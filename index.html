@@ -501,6 +501,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
 
 <!-- ============ MODALES ============ -->
 <div id="modal-root"></div>
+<div id="modal-root-nfc"></div>
 <audio id="beep-ok" src="data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=" preload="auto"></audio>
 
 <script>
@@ -623,6 +624,19 @@ function showModal(html){
     <button class="modal-close" onclick="closeModal()">×</button>${html}</div></div>`;
 }
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
+
+/* Capa de modal independiente, exclusiva para los diálogos de escaneo/
+   escritura NFC. Antes usaban showModal()/closeModal(), que comparten un
+   único contenedor con los formularios (usuarios, productos, etc.); al
+   abrir el escaneo NFC desde dentro de otro modal (ej. "Nuevo usuario"),
+   se reemplazaba y luego se borraba TODO el contenido, cerrando el
+   formulario de golpe. Con un contenedor propio, el diálogo NFC queda
+   apilado encima sin afectar el modal que estaba abierto debajo. */
+function showModalNfc(html){
+  document.getElementById('modal-root-nfc').innerHTML = `<div class="modal-overlay" style="z-index:200;" onclick="if(event.target===this)closeModalNfc()"><div class="modal-box">
+    <button class="modal-close" onclick="closeModalNfc()">×</button>${html}</div></div>`;
+}
+function closeModalNfc(){ document.getElementById('modal-root-nfc').innerHTML=''; }
 
 /* ============================================================
    USUARIO — PERFIL
@@ -1027,12 +1041,12 @@ function nfcManualConfirm(){
 }
 function finishNfcRead(value){
   const cb = _nfcCallback; _nfcCallback = null;
-  closeModal();
+  closeModalNfc();
   if(cb) cb(value);
 }
 async function iniciarLecturaNFC(callback){
   _nfcCallback = callback;
-  showModal(nfcModalHTML());
+  showModalNfc(nfcModalHTML());
   const msgEl = ()=>document.getElementById('nfc-modal-msg');
   if(!window.isSecureContext){
     if(msgEl()) msgEl().innerHTML = '⚠️ La lectura NFC solo funciona con la página abierta por <b>HTTPS</b> (o localhost). Publica la app en un hosting seguro, o ingresa el ID manualmente.';
@@ -1045,7 +1059,11 @@ async function iniciarLecturaNFC(callback){
   try{
     const reader = new NDEFReader();
     reader.onreading = (event)=>{
-      const serial = event.serialNumber || ('nfc-'+Date.now());
+      const serial = (event.serialNumber||'').trim();
+      if(!serial){
+        if(msgEl()) msgEl().innerHTML = '⚠️ Esta pulsera no entrega un número de serie legible desde el navegador (pasa con algunos tags/lectores). No se puede usar como identificador porque no sería reproducible en el próximo escaneo. Usa la pestaña <b>"Lector/Escritor NFC"</b> para escribir la cédula directamente en el tag, o ingresa un ID manualmente.';
+        return;
+      }
       finishNfcRead(serial);
       toast('Pulsera detectada: '+serial);
     };
@@ -1069,7 +1087,7 @@ function scanNfcInto(inputId){
    fue vinculada por serial o por cédula escrita. */
 async function iniciarLecturaCompletaNFC(callback){
   _nfcCallback = (val)=>callback({ serial: val, texto: null });
-  showModal(nfcModalHTML());
+  showModalNfc(nfcModalHTML());
   const msgEl = ()=>document.getElementById('nfc-modal-msg');
   if(!window.isSecureContext){
     if(msgEl()) msgEl().innerHTML = '⚠️ La lectura NFC solo funciona con la página abierta por <b>HTTPS</b> (o localhost). Ingresa el ID manualmente.';
@@ -1089,7 +1107,7 @@ async function iniciarLecturaCompletaNFC(callback){
         if(record.recordType === 'text'){ try{ texto += decoder.decode(record.data); }catch(_){} }
       }
       _nfcCallback = null;
-      closeModal();
+      closeModalNfc();
       callback({ serial, texto: texto || null });
     };
     reader.onreadingerror = ()=>{ if(msgEl()) msgEl().textContent = 'Error leyendo la pulsera, intenta de nuevo o usa el campo manual.'; };
@@ -1106,14 +1124,14 @@ async function iniciarLecturaCompletaNFC(callback){
 /* ---- Escritura NFC (graba la cédula del cliente en el tag) ---- */
 async function escribirEnNFC(texto, onSuccess){
   if(!window.isSecureContext){
-    showModal(`<h3>No disponible</h3><p class="small-note">La escritura NFC requiere que esta página se abra por <b>HTTPS</b> (o localhost).</p>`);
+    showModalNfc(`<h3>No disponible</h3><p class="small-note">La escritura NFC requiere que esta página se abra por <b>HTTPS</b> (o localhost).</p>`);
     return;
   }
   if(!('NDEFReader' in window)){
-    showModal(`<h3>No disponible</h3><p class="small-note">La escritura NFC solo funciona en <b>Chrome para Android</b> con el NFC del celular activado.</p>`);
+    showModalNfc(`<h3>No disponible</h3><p class="small-note">La escritura NFC solo funciona en <b>Chrome para Android</b> con el NFC del celular activado.</p>`);
     return;
   }
-  showModal(`<h3>Escribiendo en la pulsera</h3>
+  showModalNfc(`<h3>Escribiendo en la pulsera</h3>
     <div style="text-align:center; margin:14px 0;">
       <div style="width:64px; height:64px; border-radius:50%; background:var(--raise); display:flex; align-items:center; justify-content:center; margin:0 auto 12px; font-size:28px;">✍️</div>
       <p class="small-note" id="nfc-write-msg">Acerca la pulsera al celular para escribir...</p>
@@ -1122,7 +1140,7 @@ async function escribirEnNFC(texto, onSuccess){
     const reader = new NDEFReader();
     await reader.write(texto);
     const el = document.getElementById('nfc-write-msg'); if(el) el.textContent = '✅ Escritura completada';
-    setTimeout(closeModal, 1300);
+    setTimeout(closeModalNfc, 1300);
     if(onSuccess) await onSuccess();
   }catch(e){
     let msg = 'No se pudo escribir en la pulsera.';
@@ -1136,10 +1154,10 @@ async function escribirEnNFC(texto, onSuccess){
 /* ---- Lectura de contenido NFC (serie + texto grabado) ---- */
 async function leerContenidoNFC(onResult){
   if(!window.isSecureContext || !('NDEFReader' in window)){
-    showModal(`<h3>No disponible</h3><p class="small-note">La lectura NFC solo funciona en <b>Chrome para Android</b>, con esta página por HTTPS.</p>`);
+    showModalNfc(`<h3>No disponible</h3><p class="small-note">La lectura NFC solo funciona en <b>Chrome para Android</b>, con esta página por HTTPS.</p>`);
     return;
   }
-  showModal(`<h3>Leyendo pulsera</h3>
+  showModalNfc(`<h3>Leyendo pulsera</h3>
     <div style="text-align:center; margin:14px 0;">
       <div style="width:64px; height:64px; border-radius:50%; background:var(--raise); display:flex; align-items:center; justify-content:center; margin:0 auto 12px; font-size:28px;">📶</div>
       <p class="small-note" id="nfc-read-msg">Acerca la pulsera al celular...</p>
@@ -1152,7 +1170,7 @@ async function leerContenidoNFC(onResult){
       for(const record of event.message.records){
         if(record.recordType === 'text'){ try{ texto += decoder.decode(record.data); }catch(_){} }
       }
-      closeModal();
+      closeModalNfc();
       await onResult({ serial: event.serialNumber, texto });
     };
     reader.onreadingerror = ()=>{ const el=document.getElementById('nfc-read-msg'); if(el) el.textContent='Error de lectura, vuelve a acercar la pulsera.'; };
@@ -1419,15 +1437,21 @@ function manualScanLookup(){
   if(val) lookupCliente(val);
 }
 /* Busca un usuario por: pulsera principal, cédula, id (si es uuid), o
-   cualquiera de sus pulseras adicionales en la tabla "pulseras". */
+   cualquiera de sus pulseras adicionales en la tabla "pulseras".
+   La comparación de pulsera_nfc/codigo es case-insensitive (ilike, sin
+   comodines = coincidencia exacta ignorando mayúsculas/minúsculas) porque
+   distintos celulares/lectores pueden reportar el mismo serial NFC con
+   distinto formato de mayúsculas. */
 async function buscarUsuarioPorValor(val){
   if(!val) return null;
+  const raw = val.trim();
+  if(!raw) return null;
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  let orParts = [`pulsera_nfc.eq.${val}`, `cedula.eq.${val}`];
-  if(uuidRe.test(val)) orParts.push(`id.eq.${val}`);
+  let orParts = [`pulsera_nfc.ilike.${raw}`, `cedula.eq.${raw}`];
+  if(uuidRe.test(raw)) orParts.push(`id.eq.${raw}`);
   const { data } = await sb.from('usuarios').select('*').or(orParts.join(',')).limit(1);
   if(data && data.length) return data[0];
-  const { data: pdata } = await sb.from('pulseras').select('usuario_id').eq('codigo', val).eq('activa', true).limit(1);
+  const { data: pdata } = await sb.from('pulseras').select('usuario_id').ilike('codigo', raw).eq('activa', true).limit(1);
   if(pdata && pdata.length){
     const { data: udata } = await sb.from('usuarios').select('*').eq('id', pdata[0].usuario_id).limit(1);
     if(udata && udata.length) return udata[0];
