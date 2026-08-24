@@ -297,6 +297,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
     <button class="tab-btn" data-t="usuarios" onclick="setAdminTab('usuarios')">Usuarios</button>
     <button class="tab-btn" data-t="inventario" onclick="setAdminTab('inventario')">Inventario</button>
     <button class="tab-btn" data-t="cobradores" onclick="setAdminTab('cobradores')">Cobradores</button>
+    <button class="tab-btn" data-t="nfc" onclick="setAdminTab('nfc')">Lector/Escritor NFC</button>
     <button class="tab-btn" data-t="chat" onclick="setAdminTab('chat')">Chat</button>
     <button class="tab-btn" data-t="config" onclick="setAdminTab('config')">Configuración</button>
   </div>
@@ -370,6 +371,30 @@ tr:hover td{background:rgba(255,255,255,.02);}
         <thead><tr><th>Nombre</th><th>Sede</th><th>Contraseña (PIN)</th><th>Estado</th><th></th></tr></thead>
         <tbody id="cobradores-admin-body"></tbody>
       </table></div>
+    </div>
+
+    <!-- LECTOR / ESCRITOR NFC -->
+    <div class="view-panel" id="av-nfc">
+      <div class="section-hd"><h3>Escribir cédula en pulsera NFC</h3></div>
+      <div class="small-note">Funciona solo en <b>Chrome para Android</b>, con esta página servida por <b>HTTPS</b> y el NFC del celular activado. Acerca la pulsera al reverso del celular cuando se te pida.</div>
+      <div class="card" style="max-width:560px; margin-top:14px;">
+        <label>Buscar cliente</label>
+        <div class="search-row" style="margin-top:6px;">
+          <input id="nfc-tab-buscar" placeholder="Nombre, cédula o correo..." onkeydown="if(event.key==='Enter')buscarClientesNfcTab()">
+          <button class="btn btn-ghost btn-sm" onclick="buscarClientesNfcTab()">Buscar</button>
+        </div>
+        <div id="nfc-tab-resultados"></div>
+        <div class="card" style="margin-top:10px; background:var(--panel2);">
+          <div class="stat-lbl">Cliente seleccionado</div>
+          <div id="nfc-tab-seleccionado" style="margin-top:4px;">Ninguno todavía — búscalo arriba y tócalo en la lista</div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
+          <button class="btn btn-primary" style="flex:1; min-width:180px;" onclick="escribirCedulaEnPulsera()">✍️ Escribir cédula en pulsera</button>
+          <button class="btn btn-ghost" style="flex:1; min-width:180px;" onclick="leerPulseraTab()">📶 Leer pulsera</button>
+        </div>
+      </div>
+      <div class="section-hd"><h3>Última lectura</h3></div>
+      <div class="card" id="nfc-tab-lectura-result">Aún no se ha leído ninguna pulsera desde esta pestaña.</div>
     </div>
 
     <!-- CHAT ADMIN -->
@@ -756,6 +781,7 @@ function setAdminTab(t){
   if(t==='usuarios') loadUsuariosAdmin();
   if(t==='inventario') loadProductosAdmin();
   if(t==='cobradores') loadCobradoresAdmin();
+  if(t==='nfc'){ nfcTabCliente=null; document.getElementById('nfc-tab-seleccionado').textContent='Ninguno todavía — búscalo arriba y tócalo en la lista'; }
   if(t==='chat') loadAdminChatList();
   if(t==='config') loadConfigAdmin();
 }
@@ -974,6 +1000,118 @@ function scanNfcInto(inputId){
   iniciarLecturaNFC((val)=>{ document.getElementById(inputId).value = val; toast('Pulsera asignada'); });
 }
 
+/* ---- Escritura NFC (graba la cédula del cliente en el tag) ---- */
+async function escribirEnNFC(texto, onSuccess){
+  if(!window.isSecureContext){
+    showModal(`<h3>No disponible</h3><p class="small-note">La escritura NFC requiere que esta página se abra por <b>HTTPS</b> (o localhost).</p>`);
+    return;
+  }
+  if(!('NDEFReader' in window)){
+    showModal(`<h3>No disponible</h3><p class="small-note">La escritura NFC solo funciona en <b>Chrome para Android</b> con el NFC del celular activado.</p>`);
+    return;
+  }
+  showModal(`<h3>Escribiendo en la pulsera</h3>
+    <div style="text-align:center; margin:14px 0;">
+      <div style="width:64px; height:64px; border-radius:50%; background:var(--raise); display:flex; align-items:center; justify-content:center; margin:0 auto 12px; font-size:28px;">✍️</div>
+      <p class="small-note" id="nfc-write-msg">Acerca la pulsera al celular para escribir...</p>
+    </div>`);
+  try{
+    const reader = new NDEFReader();
+    await reader.write(texto);
+    const el = document.getElementById('nfc-write-msg'); if(el) el.textContent = '✅ Escritura completada';
+    setTimeout(closeModal, 1300);
+    if(onSuccess) await onSuccess();
+  }catch(e){
+    let msg = 'No se pudo escribir en la pulsera.';
+    if(e.name==='NotAllowedError') msg = 'Permiso de NFC denegado. Actívalo en los ajustes e inténtalo de nuevo.';
+    else if(e.name==='NotSupportedError') msg = 'Este dispositivo no tiene NFC o está desactivado.';
+    else if(e.name==='NetworkError') msg = 'No se pudo escribir: la pulsera podría estar protegida o alejarse muy rápido.';
+    const el = document.getElementById('nfc-write-msg'); if(el) el.innerHTML = '⚠️ ' + msg;
+  }
+}
+
+/* ---- Lectura de contenido NFC (serie + texto grabado) ---- */
+async function leerContenidoNFC(onResult){
+  if(!window.isSecureContext || !('NDEFReader' in window)){
+    showModal(`<h3>No disponible</h3><p class="small-note">La lectura NFC solo funciona en <b>Chrome para Android</b>, con esta página por HTTPS.</p>`);
+    return;
+  }
+  showModal(`<h3>Leyendo pulsera</h3>
+    <div style="text-align:center; margin:14px 0;">
+      <div style="width:64px; height:64px; border-radius:50%; background:var(--raise); display:flex; align-items:center; justify-content:center; margin:0 auto 12px; font-size:28px;">📶</div>
+      <p class="small-note" id="nfc-read-msg">Acerca la pulsera al celular...</p>
+    </div>`);
+  try{
+    const reader = new NDEFReader();
+    reader.onreading = async (event)=>{
+      const decoder = new TextDecoder();
+      let texto = '';
+      for(const record of event.message.records){
+        if(record.recordType === 'text'){ try{ texto += decoder.decode(record.data); }catch(_){} }
+      }
+      closeModal();
+      await onResult({ serial: event.serialNumber, texto });
+    };
+    reader.onreadingerror = ()=>{ const el=document.getElementById('nfc-read-msg'); if(el) el.textContent='Error de lectura, vuelve a acercar la pulsera.'; };
+    await reader.scan();
+  }catch(e){
+    let msg = 'No se pudo iniciar la lectura.';
+    if(e.name==='NotAllowedError') msg = 'Permiso de NFC denegado.';
+    else if(e.name==='NotSupportedError') msg = 'Este dispositivo no tiene NFC o está desactivado.';
+    const el = document.getElementById('nfc-read-msg'); if(el) el.innerHTML = '⚠️ ' + msg;
+  }
+}
+
+/* ---- Pestaña "Lector/Escritor NFC" del admin ---- */
+let nfcTabCliente = null;
+async function buscarClientesNfcTab(){
+  const f = document.getElementById('nfc-tab-buscar').value.trim().toLowerCase();
+  if(!f){ toast('Escribe un nombre, cédula o correo'); return; }
+  const { data } = await sb.from('usuarios').select('id,nombre,cedula,correo,pulsera_nfc').limit(500);
+  const rows = (data||[]).filter(u=> (u.nombre||'').toLowerCase().includes(f) || (u.cedula||'').includes(f) || (u.correo||'').toLowerCase().includes(f)).slice(0,8);
+  document.getElementById('nfc-tab-resultados').innerHTML = rows.map(u=>`
+    <div class="pick-row" style="cursor:pointer" onclick='seleccionarClienteNfcTab(${JSON.stringify(u).replace(/'/g,"&#39;")})'>
+      <div><b>${esc(u.nombre)}</b><br><span class="small-note">CC ${esc(u.cedula)}${u.pulsera_nfc?' · Pulsera actual: '+esc(u.pulsera_nfc):''}</span></div>
+      <span class="pill pill-green">Elegir</span>
+    </div>`).join('') || '<div class="small-note" style="padding:8px 0;">Sin resultados</div>';
+}
+function seleccionarClienteNfcTab(u){
+  nfcTabCliente = u;
+  document.getElementById('nfc-tab-seleccionado').innerHTML = `<b style="color:var(--text)">${esc(u.nombre)}</b> · CC ${esc(u.cedula)}${u.pulsera_nfc?' · Pulsera actual: <span class="mono">'+esc(u.pulsera_nfc)+'</span>':''}`;
+  document.getElementById('nfc-tab-resultados').innerHTML = '';
+}
+async function escribirCedulaEnPulsera(){
+  if(!nfcTabCliente){ toast('Primero busca y selecciona un cliente'); return; }
+  await escribirEnNFC(nfcTabCliente.cedula, async ()=>{
+    toast('Cédula de ' + nfcTabCliente.nombre + ' escrita en la pulsera');
+    document.getElementById('nfc-tab-lectura-result').innerHTML = `
+      <div><b>Cliente:</b> ${esc(nfcTabCliente.nombre)}</div>
+      <div style="margin-top:6px;"><b>Cédula grabada en el tag:</b> <span class="mono">${esc(nfcTabCliente.cedula)}</span></div>
+      <div style="margin-top:10px; color:var(--green);">✔ Escritura completada</div>`;
+  });
+}
+async function leerPulseraTab(){
+  await leerContenidoNFC(async ({ serial, texto })=>{
+    let html = `
+      <div><b>ID de la pulsera (número de serie):</b> <span class="mono">${esc(serial||'—')}</span></div>
+      <div style="margin-top:6px;"><b>Cédula grabada:</b> <span class="mono">${esc(texto || '— (vacía, no tiene cédula escrita)')}</span></div>`;
+    if(texto){
+      const { data } = await sb.from('usuarios').select('*').eq('cedula', texto).limit(1);
+      if(data && data.length){
+        const cliente = data[0];
+        html += `<div style="margin-top:10px; color:var(--green);">✔ Esta pulsera pertenece a: ${esc(cliente.nombre)}</div>`;
+        if(serial && !cliente.pulsera_nfc){
+          await sb.from('usuarios').update({ pulsera_nfc: serial }).eq('id', cliente.id);
+          html += `<div class="small-note">Se vinculó automáticamente el ID de serie (${esc(serial)}) a este cliente para futuros cobros.</div>`;
+        }
+      } else {
+        html += `<div style="margin-top:10px; color:var(--amber);">⚠ No hay ningún cliente registrado con esa cédula.</div>`;
+      }
+    }
+    document.getElementById('nfc-tab-lectura-result').innerHTML = html;
+  });
+}
+
 /* ---- INVENTARIO (admin) ---- */
 async function loadProductosAdmin(){
   const { data } = await sb.from('productos').select('*').order('nombre');
@@ -1160,7 +1298,13 @@ function manualScanLookup(){
   if(val) lookupCliente(val);
 }
 async function lookupCliente(text){
-  const { data } = await sb.from('usuarios').select('*').or(`id.eq.${text},pulsera_nfc.eq.${text},cedula.eq.${text}`).limit(1);
+  const val = (text||'').trim();
+  if(!val){ toast('Ingresa o escanea un valor'); return; }
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let orParts = [`pulsera_nfc.eq.${val}`, `cedula.eq.${val}`];
+  if(uuidRe.test(val)) orParts.push(`id.eq.${val}`);
+  const { data, error } = await sb.from('usuarios').select('*').or(orParts.join(',')).limit(1);
+  if(error){ toast('Error buscando cliente: '+error.message); return; }
   if(!data || !data.length){ toast('Cliente no encontrado'); return; }
   state.cobradorCurrentCliente = data[0]; state.cobradorCart = {};
   document.getElementById('cob-scan-stage').classList.add('hidden');
