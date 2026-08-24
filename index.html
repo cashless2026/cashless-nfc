@@ -354,8 +354,9 @@ tr:hover td{background:rgba(255,255,255,.02);}
         </div>
       </div>
       <div class="small-note">Columnas esperadas en Excel: producto, cantidad, valor_unitario, impuestos, descripcion</div>
+      <div class="grid-3" id="inv-resumen" style="margin:14px 0;"></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Producto</th><th>Cant.</th><th>Valor</th><th>Impuesto %</th><th>Descripción</th><th>Disponible</th><th></th></tr></thead>
+        <thead><tr><th>Producto</th><th>Cant.</th><th>Valor</th><th>Impuesto %</th><th>Descripción</th><th>Estado</th><th>Visible</th><th></th></tr></thead>
         <tbody id="productos-admin-body"></tbody>
       </table></div>
     </div>
@@ -480,6 +481,9 @@ tr:hover td{background:rgba(255,255,255,.02);}
         </div>
       </div>
       <div class="section-hd"><h3>Selecciona producto</h3></div>
+      <div class="field" style="margin-bottom:10px;">
+        <input id="cob-prod-buscar" placeholder="🔍 Buscar producto por nombre..." oninput="filtrarProductosCobrador()">
+      </div>
       <div id="cob-prod-list"></div>
       <div class="card" style="margin-top:16px; display:flex; justify-content:space-between; align-items:center;">
         <div><div class="stat-lbl">Total a cobrar</div><div class="stat-val mono" id="cc-total">$0</div></div>
@@ -508,7 +512,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const BUCKET = 'wallet-files';
 
-let state = { role:null, usuario:null, cobrador:null, adminOk:false, chatUsuarioId:null, cobradorCurrentCliente:null, cobradorCart:{}, qrScanner:null };
+let state = { role:null, usuario:null, cobrador:null, adminOk:false, chatUsuarioId:null, cobradorCurrentCliente:null, cobradorCart:{}, cobradorProductos:[], qrScanner:null };
 
 function money(n){ return '$' + Number(n||0).toLocaleString('es-CO', {maximumFractionDigits:0}); }
 function fmtDate(d){ return new Date(d).toLocaleString('es-CO', {dateStyle:'short', timeStyle:'short'}); }
@@ -607,7 +611,7 @@ async function loginAdmin(){
 }
 
 function logout(){
-  state = { role:null, usuario:null, cobrador:null, adminOk:false, chatUsuarioId:null, cobradorCurrentCliente:null, cobradorCart:{}, qrScanner:null };
+  state = { role:null, usuario:null, cobrador:null, adminOk:false, chatUsuarioId:null, cobradorCurrentCliente:null, cobradorCart:{}, cobradorProductos:[], qrScanner:null };
   document.querySelectorAll('.app-shell').forEach(s=>s.classList.add('hidden'));
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('user-identificador').value='';
@@ -852,21 +856,79 @@ async function loadUsuariosAdmin(){
     <button class="btn btn-ghost btn-sm" onclick='showUserQrModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>QR</button></div></td>
   </tr>`).join('') || '<tr><td colspan="7" class="small-note">Sin usuarios</td></tr>';
 }
-function openUsuarioModal(u){
+/* ---- Pulseras múltiples por usuario (formulario de registro) ---- */
+let umPulserasList = [];
+async function openUsuarioModal(u){
   const isEdit = !!u;
+  umPulserasList = [];
+  if(isEdit){
+    const { data } = await sb.from('pulseras').select('*').eq('usuario_id', u.id).eq('activa', true).order('created_at');
+    umPulserasList = (data||[]).map(p=>({ codigo: p.codigo, id: p.id }));
+    if(u.pulsera_nfc && !umPulserasList.some(p=>p.codigo===u.pulsera_nfc)){
+      umPulserasList.unshift({ codigo: u.pulsera_nfc, id: null });
+    }
+  }
   showModal(`
     <h3>${isEdit?'Editar':'Nuevo'} usuario</h3>
     <div class="field"><label>Nombre</label><input id="um-nombre" value="${isEdit?esc(u.nombre):''}"></div>
     <div class="field"><label>Cédula</label><input id="um-cedula" value="${isEdit?esc(u.cedula):''}"></div>
     <div class="field"><label>Correo</label><input id="um-correo" value="${isEdit?esc(u.correo||''):''}"></div>
     <div class="field"><label>Código de acceso (4 dígitos)</label><div style="display:flex;gap:8px;"><input id="um-codigo" value="${isEdit?esc(u.codigo_acceso):gen4Digits()}"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('um-codigo').value=gen4Digits()">🎲</button></div></div>
-    <div class="field"><label>Pulsera NFC</label><div style="display:flex;gap:8px;"><input id="um-pulsera" value="${isEdit?esc(u.pulsera_nfc||''):''}" placeholder="Escanea o escribe el ID"><button class="nfc-btn" onclick="scanNfcInto('um-pulsera')">📶</button></div></div>
+    <div class="field">
+      <label>Pulseras NFC asignadas (<span id="um-pulseras-count">${umPulserasList.length}</span>)</label>
+      <div id="um-pulseras-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">${renderUmPulserasChips()}</div>
+      <div style="display:flex; gap:8px;">
+        <input id="um-pulsera-nueva" placeholder="Escanea o escribe el ID y presiona +" onkeydown="if(event.key==='Enter'){event.preventDefault();agregarPulseraManual();}">
+        <button class="nfc-btn" onclick="scanNfcParaAgregar()">📶</button>
+        <button class="btn btn-ghost btn-sm" onclick="agregarPulseraManual()">+</button>
+      </div>
+      <div class="small-note" style="margin-top:4px;">Un cliente puede tener varias pulseras (ej. una de repuesto o para varios familiares). Escanea o escribe una y presiona + para agregarla; puedes repetir varias veces.</div>
+    </div>
     <div class="field"><label>Foto (URL o subir archivo)</label>
       <input id="um-foto-url" value="${isEdit?esc(u.foto_url||''):''}" placeholder="https://..." style="margin-bottom:6px;">
       <input type="file" id="um-foto-file" accept="image/*">
     </div>
     <button class="btn btn-primary" style="width:100%" onclick="saveUsuario(${isEdit?`'${u.id}'`:'null'})">Guardar</button>
   `);
+}
+function renderUmPulserasChips(){
+  if(!umPulserasList.length) return '<span class="small-note">Ninguna todavía</span>';
+  return umPulserasList.map((p,i)=>`<span class="pill pill-green mono" style="gap:8px;">${esc(p.codigo)} <span style="cursor:pointer" onclick="quitarPulsera(${i})" title="Quitar">✕</span></span>`).join('');
+}
+function refreshUmPulserasUI(){
+  document.getElementById('um-pulseras-chips').innerHTML = renderUmPulserasChips();
+  document.getElementById('um-pulseras-count').textContent = umPulserasList.length;
+}
+function quitarPulsera(i){ umPulserasList.splice(i,1); refreshUmPulserasUI(); }
+function agregarPulseraManual(){
+  const input = document.getElementById('um-pulsera-nueva');
+  const val = input.value.trim();
+  if(!val){ toast('Ingresa un ID de pulsera'); return; }
+  if(umPulserasList.some(p=>p.codigo===val)){ toast('Esa pulsera ya está en la lista'); return; }
+  umPulserasList.push({ codigo: val, id: null });
+  input.value='';
+  refreshUmPulserasUI();
+}
+function scanNfcParaAgregar(){
+  iniciarLecturaNFC((val)=>{
+    if(umPulserasList.some(p=>p.codigo===val)){ toast('Esa pulsera ya está en la lista'); return; }
+    umPulserasList.push({ codigo: val, id: null });
+    refreshUmPulserasUI();
+    toast('Pulsera agregada');
+  });
+}
+async function syncPulserasUsuario(usuarioId){
+  const { data: existentes } = await sb.from('pulseras').select('*').eq('usuario_id', usuarioId);
+  const codigosNuevos = umPulserasList.map(p=>p.codigo);
+  const aAgregar = umPulserasList.filter(p=>!(existentes||[]).some(e=>e.codigo===p.codigo));
+  const aQuitar = (existentes||[]).filter(e=>!codigosNuevos.includes(e.codigo));
+  for(const p of aAgregar){
+    const { error } = await sb.from('pulseras').insert({ usuario_id: usuarioId, codigo: p.codigo });
+    if(error) toast('No se pudo asignar la pulsera '+p.codigo+': '+error.message);
+  }
+  for(const e of aQuitar){
+    await sb.from('pulseras').delete().eq('id', e.id);
+  }
 }
 async function saveUsuario(id){
   let fotoUrl = document.getElementById('um-foto-url').value.trim();
@@ -876,7 +938,7 @@ async function saveUsuario(id){
     cedula: document.getElementById('um-cedula').value.trim(),
     correo: document.getElementById('um-correo').value.trim() || null,
     codigo_acceso: document.getElementById('um-codigo').value.trim(),
-    pulsera_nfc: document.getElementById('um-pulsera').value.trim() || null,
+    pulsera_nfc: umPulserasList[0]?.codigo || null,
   };
   if(!payload.nombre || !payload.cedula){ toast('Nombre y cédula son obligatorios'); return; }
   if(file){ fotoUrl = await uploadFile(file, `fotos/${payload.cedula}_${Date.now()}.jpg`) || fotoUrl; }
@@ -891,6 +953,7 @@ async function saveUsuario(id){
     error = res.error; savedUser = res.data;
   }
   if(error){ toast('Error: '+error.message); return; }
+  if(savedUser && savedUser.id){ await syncPulserasUsuario(savedUser.id); }
   closeModal(); toast('Usuario guardado'); loadUsuariosAdmin();
   if(!id && savedUser && savedUser.id){ showUserQrModal(savedUser); }
 }
@@ -998,6 +1061,46 @@ async function iniciarLecturaNFC(callback){
 }
 function scanNfcInto(inputId){
   iniciarLecturaNFC((val)=>{ document.getElementById(inputId).value = val; toast('Pulsera asignada'); });
+}
+
+/* Igual que iniciarLecturaNFC pero además decodifica el texto (ej. la
+   cédula) grabado en el tag NDEF, no solo el serial del chip. Usado por
+   el cobrador para que el escaneo funcione sin importar si la pulsera
+   fue vinculada por serial o por cédula escrita. */
+async function iniciarLecturaCompletaNFC(callback){
+  _nfcCallback = (val)=>callback({ serial: val, texto: null });
+  showModal(nfcModalHTML());
+  const msgEl = ()=>document.getElementById('nfc-modal-msg');
+  if(!window.isSecureContext){
+    if(msgEl()) msgEl().innerHTML = '⚠️ La lectura NFC solo funciona con la página abierta por <b>HTTPS</b> (o localhost). Ingresa el ID manualmente.';
+    return;
+  }
+  if(!('NDEFReader' in window)){
+    if(msgEl()) msgEl().innerHTML = '⚠️ Este navegador o dispositivo no soporta lectura NFC. Web NFC solo está disponible en <b>Chrome para Android</b>. Ingresa el ID manualmente.';
+    return;
+  }
+  try{
+    const reader = new NDEFReader();
+    reader.onreading = (event)=>{
+      const serial = event.serialNumber || null;
+      let texto = '';
+      const decoder = new TextDecoder();
+      for(const record of (event.message?.records||[])){
+        if(record.recordType === 'text'){ try{ texto += decoder.decode(record.data); }catch(_){} }
+      }
+      _nfcCallback = null;
+      closeModal();
+      callback({ serial, texto: texto || null });
+    };
+    reader.onreadingerror = ()=>{ if(msgEl()) msgEl().textContent = 'Error leyendo la pulsera, intenta de nuevo o usa el campo manual.'; };
+    await reader.scan();
+    if(msgEl()) msgEl().textContent = 'Listo. Acerca ahora la pulsera al celular...';
+  }catch(e){
+    let msg = 'No se pudo iniciar el lector NFC.';
+    if(e.name==='NotAllowedError') msg = 'Permiso de NFC denegado. Actívalo en los ajustes del navegador o del celular e inténtalo de nuevo.';
+    else if(e.name==='NotSupportedError') msg = 'Este dispositivo no tiene NFC o está desactivado en el sistema.';
+    if(msgEl()) msgEl().innerHTML = '⚠️ ' + msg + ' Puedes ingresar el ID manualmente.';
+  }
 }
 
 /* ---- Escritura NFC (graba la cédula del cliente en el tag) ---- */
@@ -1113,14 +1216,32 @@ async function leerPulseraTab(){
 }
 
 /* ---- INVENTARIO (admin) ---- */
+const INV_STOCK_BAJO = 5;
+function estadoProducto(p){
+  if(!p.disponible) return { txt:'Oculto', pill:'red' };
+  if(p.cantidad <= 0) return { txt:'Agotado', pill:'red' };
+  if(p.cantidad <= INV_STOCK_BAJO) return { txt:'Stock bajo', pill:'amber' };
+  return { txt:'Disponible', pill:'green' };
+}
 async function loadProductosAdmin(){
   const { data } = await sb.from('productos').select('*').order('nombre');
-  document.getElementById('productos-admin-body').innerHTML = (data||[]).map(p=>`<tr>
+  const productos = data || [];
+  const agotados = productos.filter(p=>p.cantidad<=0).length;
+  const bajos = productos.filter(p=>p.cantidad>0 && p.cantidad<=INV_STOCK_BAJO).length;
+  document.getElementById('inv-resumen').innerHTML = `
+    <div class="stat-card"><div class="stat-lbl">Total productos</div><div class="stat-val">${productos.length}</div></div>
+    <div class="stat-card"><div class="stat-lbl">Agotados</div><div class="stat-val" style="color:var(--red);">${agotados}</div></div>
+    <div class="stat-card"><div class="stat-lbl">Stock bajo (≤${INV_STOCK_BAJO})</div><div class="stat-val" style="color:var(--amber);">${bajos}</div></div>`;
+  document.getElementById('productos-admin-body').innerHTML = productos.map(p=>{
+    const est = estadoProducto(p);
+    return `<tr>
     <td>${esc(p.nombre)}</td><td>${p.cantidad}</td><td class="mono">${money(p.valor_unitario)}</td><td>${p.impuesto_pct}%</td>
     <td>${esc(p.descripcion||'—')}</td>
+    <td><span class="pill pill-${est.pill}">${est.txt}</span></td>
     <td><span class="pill pill-${p.disponible?'green':'red'}" style="cursor:pointer" onclick="toggleProducto('${p.id}', ${!p.disponible})">${p.disponible?'Sí':'No'}</span></td>
     <td><button class="btn btn-ghost btn-sm" onclick='openProductoModal(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Editar</button></td>
-  </tr>`).join('') || '<tr><td colspan="7" class="small-note">Sin productos</td></tr>';
+  </tr>`;
+  }).join('') || '<tr><td colspan="8" class="small-note">Sin productos</td></tr>';
 }
 async function toggleProducto(id, val){ await sb.from('productos').update({ disponible: val }).eq('id', id); loadProductosAdmin(); }
 function openProductoModal(p){
@@ -1291,29 +1412,58 @@ function startQrScan(){
   ).catch(err=> toast('No se pudo abrir la cámara: '+err));
 }
 function startNfcScan(){
-  iniciarLecturaNFC((val)=>{ lookupCliente(val); });
+  iniciarLecturaCompletaNFC(({serial, texto})=>{ lookupClienteNfc(serial, texto); });
 }
 function manualScanLookup(){
   const val = document.getElementById('manual-scan-input').value.trim();
   if(val) lookupCliente(val);
 }
-async function lookupCliente(text){
-  const val = (text||'').trim();
-  if(!val){ toast('Ingresa o escanea un valor'); return; }
+/* Busca un usuario por: pulsera principal, cédula, id (si es uuid), o
+   cualquiera de sus pulseras adicionales en la tabla "pulseras". */
+async function buscarUsuarioPorValor(val){
+  if(!val) return null;
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let orParts = [`pulsera_nfc.eq.${val}`, `cedula.eq.${val}`];
   if(uuidRe.test(val)) orParts.push(`id.eq.${val}`);
-  const { data, error } = await sb.from('usuarios').select('*').or(orParts.join(',')).limit(1);
-  if(error){ toast('Error buscando cliente: '+error.message); return; }
-  if(!data || !data.length){ toast('Cliente no encontrado'); return; }
-  state.cobradorCurrentCliente = data[0]; state.cobradorCart = {};
+  const { data } = await sb.from('usuarios').select('*').or(orParts.join(',')).limit(1);
+  if(data && data.length) return data[0];
+  const { data: pdata } = await sb.from('pulseras').select('usuario_id').eq('codigo', val).eq('activa', true).limit(1);
+  if(pdata && pdata.length){
+    const { data: udata } = await sb.from('usuarios').select('*').eq('id', pdata[0].usuario_id).limit(1);
+    if(udata && udata.length) return udata[0];
+  }
+  return null;
+}
+function mostrarClienteCobrador(cliente){
+  state.cobradorCurrentCliente = cliente; state.cobradorCart = {};
   document.getElementById('cob-scan-stage').classList.add('hidden');
   document.getElementById('cob-charge-stage').classList.remove('hidden');
-  document.getElementById('cc-photo').src = data[0].foto_url || 'https://api.dicebear.com/7.x/initials/svg?seed='+encodeURIComponent(data[0].nombre);
-  document.getElementById('cc-nombre').textContent = data[0].nombre;
-  document.getElementById('cc-pulsera').textContent = data[0].pulsera_nfc || 'Sin pulsera';
-  document.getElementById('cc-saldo').textContent = money(data[0].saldo);
+  document.getElementById('cc-photo').src = cliente.foto_url || 'https://api.dicebear.com/7.x/initials/svg?seed='+encodeURIComponent(cliente.nombre);
+  document.getElementById('cc-nombre').textContent = cliente.nombre;
+  document.getElementById('cc-pulsera').textContent = cliente.pulsera_nfc || 'Sin pulsera';
+  document.getElementById('cc-saldo').textContent = money(cliente.saldo);
   loadProductosCobrador();
+}
+async function lookupCliente(text){
+  const val = (text||'').trim();
+  if(!val){ toast('Ingresa o escanea un valor'); return; }
+  const cliente = await buscarUsuarioPorValor(val);
+  if(!cliente){ toast('Cliente no encontrado'); return; }
+  mostrarClienteCobrador(cliente);
+}
+/* Al leer una pulsera física puede venir: el texto grabado (cédula, si se
+   escribió desde la pestaña NFC del admin) y/o el número de serie del chip.
+   Antes solo se usaba el serial, por lo que si la pulsera solo tenía la
+   cédula grabada (y no se había vinculado el serial) nunca se encontraba
+   al cliente. Ahora se intenta primero con el texto grabado y luego con
+   el serial, y además se revisa la tabla de pulseras adicionales. */
+async function lookupClienteNfc(serial, texto){
+  const candidatos = [texto, serial].map(v=>(v||'').trim()).filter(Boolean);
+  for(const c of candidatos){
+    const cliente = await buscarUsuarioPorValor(c);
+    if(cliente){ mostrarClienteCobrador(cliente); return; }
+  }
+  toast('Cliente no encontrado. Esa pulsera no tiene cédula grabada ni está registrada — asígnala desde Usuarios o la pestaña NFC del admin.');
 }
 function resetCobradorScan(){
   document.getElementById('cob-charge-stage').classList.add('hidden');
@@ -1322,15 +1472,29 @@ function resetCobradorScan(){
 }
 async function loadProductosCobrador(){
   const { data } = await sb.from('productos').select('*').eq('disponible', true).gt('cantidad', 0).order('nombre');
-  document.getElementById('cob-prod-list').innerHTML = (data||[]).map(p=>`
+  state.cobradorProductos = data || [];
+  const buscar = document.getElementById('cob-prod-buscar');
+  if(buscar) buscar.value = '';
+  renderProductosCobrador(state.cobradorProductos);
+}
+function filtrarProductosCobrador(){
+  const f = document.getElementById('cob-prod-buscar').value.trim().toLowerCase();
+  const lista = !f ? state.cobradorProductos : (state.cobradorProductos||[]).filter(p=>(p.nombre||'').toLowerCase().includes(f));
+  renderProductosCobrador(lista);
+}
+function renderProductosCobrador(lista){
+  document.getElementById('cob-prod-list').innerHTML = (lista||[]).map(p=>{
+    const qty = state.cobradorCart[p.id]?.cantidad || 0;
+    return `
     <div class="pick-row">
       <div><b>${esc(p.nombre)}</b><br><span class="small-note">${money(p.valor_unitario)} · Stock ${p.cantidad}</span></div>
       <div class="qty-stepper">
         <button onclick="changeQty('${p.id}', -1)">−</button>
-        <span id="qty-${p.id}">0</span>
+        <span id="qty-${p.id}">${qty}</span>
         <button onclick="changeQty('${p.id}', 1, ${p.cantidad}, ${p.valor_unitario}, '${esc(p.nombre).replace(/'/g,"\\'")}')">+</button>
       </div>
-    </div>`).join('') || '<div class="small-note">No hay productos disponibles</div>';
+    </div>`;
+  }).join('') || '<div class="small-note">Sin resultados</div>';
 }
 function changeQty(id, delta, maxStock, valor, nombre){
   const current = state.cobradorCart[id]?.cantidad || 0;
