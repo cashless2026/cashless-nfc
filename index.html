@@ -252,7 +252,10 @@ tr:hover td{background:rgba(255,255,255,.02);}
       <div class="flip-hint">Toca la tarjeta para ver tus consumos ↺</div>
       <div class="card" style="max-width:400px; margin:0 auto; text-align:center;">
         <div style="font-size:12.5px; color:var(--muted); font-weight:700; margin-bottom:10px;">TU CÓDIGO QR PARA COBROS</div>
-        <div class="qr-box" style="display:inline-block; min-width:150px; min-height:150px;"><canvas id="user-qr-canvas" width="150" height="150"></canvas></div>
+        <div class="qr-box" style="display:inline-block; min-width:150px; min-height:150px;">
+          <canvas id="user-qr-canvas" width="150" height="150"></canvas>
+          <img id="user-qr-img" style="display:none; width:150px; height:150px;" alt="Código QR para cobros">
+        </div>
         <div class="small-note" id="user-qr-note" style="margin-top:8px;"></div>
       </div>
     </div>
@@ -697,13 +700,39 @@ async function renderUserProfile(){
 function renderUserQr(){
   const u = state.usuario;
   const canvas = document.getElementById('user-qr-canvas');
+  const img = document.getElementById('user-qr-img');
   const note = document.getElementById('user-qr-note');
   if(!canvas || !u) return;
   const valor = (u.cedula || '').trim() || u.id;
   if(note) note.textContent = '';
-  QRCode.toCanvas(canvas, valor, { width:150, margin:1, color:{dark:'#0A0E13'} }, (err)=>{
-    if(err){ if(note) note.textContent = 'No se pudo generar el QR: '+err.message; console.error('QR error:', err); }
-  });
+  canvas.style.display = '';
+  if(img) img.style.display = 'none';
+  if(typeof QRCode === 'undefined'){
+    mostrarQrFallback(valor, canvas, img, note);
+    return;
+  }
+  try{
+    QRCode.toCanvas(canvas, valor, { width:150, margin:1, color:{dark:'#0A0E13'} }, (err)=>{
+      if(err){ console.error('QR error:', err); mostrarQrFallback(valor, canvas, img, note); }
+    });
+  }catch(e){
+    console.error('QR error:', e);
+    mostrarQrFallback(valor, canvas, img, note);
+  }
+}
+/* Plan B: si la librería de QR (cargada desde un CDN externo) no está
+   disponible —por ejemplo, si la red o el hosting bloquean ese dominio—
+   se genera el QR con un servicio alterno por imagen, para que el cliente
+   igual pueda mostrarlo. Si ni siquiera esa imagen carga, es un problema
+   de conexión a internet del dispositivo, no de la app. */
+function mostrarQrFallback(valor, canvas, img, note){
+  if(canvas) canvas.style.display = 'none';
+  if(img){
+    img.onerror = ()=>{ if(note) note.textContent = 'No se pudo generar el QR: revisa la conexión a internet de este dispositivo.'; };
+    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=' + encodeURIComponent(valor);
+    img.style.display = '';
+  }
+  if(note && !note.textContent) note.textContent = 'QR generado con un servicio alterno.';
 }
 /* Consumos recientes que se muestran al girar la tarjeta. Se separa en su
    propia función para poder refrescarla cada vez que el usuario voltea la
@@ -1073,7 +1102,10 @@ function showUserQrModal(u){
     <h3>Código QR de ${esc(u.nombre)}</h3>
     <p class="small-note" style="margin-bottom:14px;">Compártelo con el cliente para que el cobrador lo escanee, o entrégale su código de acceso.</p>
     <div style="text-align:center;">
-      <div class="qr-box" style="display:inline-block; min-width:180px; min-height:180px;"><canvas id="new-user-qr" width="180" height="180"></canvas></div>
+      <div class="qr-box" style="display:inline-block; min-width:180px; min-height:180px;">
+        <canvas id="new-user-qr" width="180" height="180"></canvas>
+        <img id="new-user-qr-img" style="display:none; width:180px; height:180px;" alt="Código QR de ${esc(u.nombre)}">
+      </div>
       <div style="margin-top:12px; font-family:var(--mono); font-size:24px; font-weight:700; letter-spacing:.12em; color:var(--green);">${esc(u.codigo_acceso||'----')}</div>
       <div class="small-note">Código de acceso</div>
       <div class="small-note" style="margin-top:6px;">${u.cedula ? 'QR generado con la cédula: <span class="mono">'+esc(u.cedula)+'</span> — funciona aunque no tenga pulsera NFC asignada.' : 'Este cliente no tiene cédula registrada; el QR usa un identificador interno.'}</div>
@@ -1081,8 +1113,28 @@ function showUserQrModal(u){
     <button class="btn btn-primary" style="width:100%; margin-top:16px;" onclick="closeModal()">Listo</button>
   `);
   const canvas = document.getElementById('new-user-qr');
+  const imgQr = document.getElementById('new-user-qr-img');
   if(canvas && valorQr){
-    QRCode.toCanvas(canvas, valorQr, { width:180, margin:1, color:{dark:'#0A0E13'} }, (err)=>{ if(err) toast('No se pudo generar el QR: '+err.message); });
+    if(typeof QRCode === 'undefined'){
+      canvas.style.display='none';
+      imgQr.onerror = ()=>toast('No se pudo generar el QR: revisa la conexión a internet.');
+      imgQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(valorQr);
+      imgQr.style.display='';
+      return;
+    }
+    try{
+      QRCode.toCanvas(canvas, valorQr, { width:180, margin:1, color:{dark:'#0A0E13'} }, (err)=>{
+        if(err){
+          canvas.style.display='none';
+          imgQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(valorQr);
+          imgQr.style.display='';
+        }
+      });
+    }catch(e){
+      canvas.style.display='none';
+      imgQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(valorQr);
+      imgQr.style.display='';
+    }
   }
 }
 function openSaldoModal(userId){
