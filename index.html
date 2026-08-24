@@ -295,6 +295,9 @@ tr:hover td{background:rgba(255,255,255,.02);}
     <div class="topbar-left"><div class="brand-mark" style="width:30px;height:30px;font-size:14px;">W</div><b>Panel Admin</b></div>
     <button class="logout-btn" onclick="logout()">Salir</button>
   </div>
+  <div id="admin-alerta-global" class="hidden" style="background:var(--red); color:#fff; padding:10px 16px; font-weight:700; text-align:center; cursor:pointer;" onclick="setAdminTab('evento')">
+    ⚠ Falta menos de 1 hora para el cierre del evento — <span id="admin-alerta-global-count">0</span> cliente(s) con saldo negativo. Toca para ver el listado.
+  </div>
   <div class="tabbar">
     <button class="tab-btn active" data-t="resumen" onclick="setAdminTab('resumen')">Resumen</button>
     <button class="tab-btn" data-t="recargas" onclick="setAdminTab('recargas')">Recargas</button>
@@ -303,15 +306,21 @@ tr:hover td{background:rgba(255,255,255,.02);}
     <button class="tab-btn" data-t="cobradores" onclick="setAdminTab('cobradores')">Cobradores</button>
     <button class="tab-btn" data-t="nfc" onclick="setAdminTab('nfc')">Lector/Escritor NFC</button>
     <button class="tab-btn" data-t="chat" onclick="setAdminTab('chat')">Chat</button>
+    <button class="tab-btn" data-t="evento" onclick="setAdminTab('evento')">Evento</button>
     <button class="tab-btn" data-t="config" onclick="setAdminTab('config')">Configuración</button>
   </div>
   <div class="view">
     <!-- RESUMEN -->
     <div class="view-panel active" id="av-resumen">
-      <div class="grid-3">
+      <div class="grid-3" style="grid-template-columns:repeat(4,1fr);">
         <div class="stat-card"><div class="stat-lbl">Recargas efectivo</div><div class="stat-val mono" id="st-efectivo">$0</div></div>
         <div class="stat-card"><div class="stat-lbl">Recargas transferencia</div><div class="stat-val mono" id="st-transferencia">$0</div></div>
         <div class="stat-card"><div class="stat-lbl">Recargas en línea</div><div class="stat-val mono" id="st-online">$0</div></div>
+        <div class="stat-card" style="cursor:pointer; border-color:var(--red);" onclick="mostrarClientesSaldoNegativo()">
+          <div class="stat-lbl" style="color:var(--red);">Saldos negativos (deben)</div>
+          <div class="stat-val mono" id="st-saldos-negativos" style="color:var(--red);">$0</div>
+          <div class="small-note" style="color:var(--red); opacity:.85;">Toca para ver clientes</div>
+        </div>
       </div>
       <div class="section-hd"><h3>Detalle agrupado por tipo de pago</h3></div>
       <div class="table-wrap"><table>
@@ -446,6 +455,26 @@ tr:hover td{background:rgba(255,255,255,.02);}
       </div>
     </div>
 
+    <!-- EVENTO -->
+    <div class="view-panel" id="av-evento">
+      <div class="section-hd"><h3>Horario del evento</h3></div>
+      <div class="small-note">Define el inicio y la hora final del evento. Cuando falte 1 hora o menos para el cierre, se activará una alerta roja con el listado de clientes que tienen saldo negativo, para pasarlos a cobrar antes de que termine.</div>
+      <div class="card" style="max-width:560px; margin-top:14px;">
+        <div class="field"><label>Inicio del evento</label><input type="datetime-local" id="ev-inicio"></div>
+        <div class="field"><label>Hora final del evento</label><input type="datetime-local" id="ev-fin"></div>
+        <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="guardarHorarioEvento()">💾 Guardar horario</button>
+      </div>
+
+      <div id="ev-alerta-cierre" class="hidden" style="margin-top:22px; padding:14px 16px; border-radius:12px; background:var(--red-dim); border:1px solid var(--red);">
+        <b style="color:var(--red);">⚠ Falta menos de 1 hora para que termine el evento</b>
+        <div class="small-note" style="margin-top:4px;">Estos clientes tienen saldo negativo — pásalos a cobrar antes del cierre:</div>
+        <div class="table-wrap" style="margin-top:10px;"><table>
+          <thead><tr><th>Nombre</th><th>Cédula</th><th>Saldo</th></tr></thead>
+          <tbody id="ev-saldos-negativos-body"></tbody>
+        </table></div>
+      </div>
+    </div>
+
     <!-- CONFIG -->
     <div class="view-panel" id="av-config">
       <div class="grid-2">
@@ -486,6 +515,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
         <button class="scan-big-btn" onclick="startQrScan()">🔳<span>Leer código QR</span></button>
         <button class="scan-big-btn" onclick="startNfcScan()">📶<span>Leer pulsera NFC</span></button>
       </div>
+      <div class="small-note" style="text-align:center; margin-bottom:10px;">"Leer código QR" usa la cámara trasera del celular. Si el cliente no tiene pulsera asignada, puede pagar mostrando su QR (funciona con su número de cédula).</div>
       <div id="qr-reader"></div>
       <div class="card" style="max-width:340px; margin:16px auto 0;">
         <label>O ingresa manualmente (ID / cédula / pulsera)</label>
@@ -880,9 +910,61 @@ function setAdminTab(t){
   if(t==='cobradores') loadCobradoresAdmin();
   if(t==='nfc'){ nfcTabPulseraActual=null; document.getElementById('nfc-tab-pulsera-actual').textContent='Ninguna pulsera escaneada todavía'; renderNfcPendientes(); }
   if(t==='chat') loadAdminChatList();
+  if(t==='evento'){ loadHorarioEvento(); checkEventoAlerta(); }
   if(t==='config') loadConfigAdmin();
 }
-function initAdminDashboard(){ loadResumenAdmin(); loadConfigAdmin(); }
+function initAdminDashboard(){
+  loadResumenAdmin(); loadConfigAdmin(); loadHorarioEvento(); checkEventoAlerta();
+  if(!window._eventoAlertaInterval){ window._eventoAlertaInterval = setInterval(checkEventoAlerta, 60000); }
+}
+
+/* ---- Horario del evento y alerta de cierre ---- */
+function toLocalInputValue(iso){
+  const d = new Date(iso);
+  const pad = n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+async function loadHorarioEvento(){
+  const { data } = await sb.from('admin_config').select('evento_inicio, evento_fin').eq('id',1).single();
+  if(data){
+    if(data.evento_inicio) document.getElementById('ev-inicio').value = toLocalInputValue(data.evento_inicio);
+    if(data.evento_fin) document.getElementById('ev-fin').value = toLocalInputValue(data.evento_fin);
+  }
+}
+async function guardarHorarioEvento(){
+  const inicio = document.getElementById('ev-inicio').value;
+  const fin = document.getElementById('ev-fin').value;
+  if(!fin){ toast('Selecciona al menos la hora final del evento'); return; }
+  const payload = {
+    evento_inicio: inicio ? new Date(inicio).toISOString() : null,
+    evento_fin: new Date(fin).toISOString(),
+  };
+  const { error } = await sb.from('admin_config').update(payload).eq('id',1);
+  if(error){ toast('Error: '+error.message); return; }
+  toast('Horario del evento guardado');
+  checkEventoAlerta();
+}
+async function checkEventoAlerta(){
+  const { data } = await sb.from('admin_config').select('evento_fin').eq('id',1).single();
+  const banner = document.getElementById('admin-alerta-global');
+  const panelAlerta = document.getElementById('ev-alerta-cierre');
+  if(!data || !data.evento_fin){ banner?.classList.add('hidden'); panelAlerta?.classList.add('hidden'); return; }
+  const finMs = new Date(data.evento_fin).getTime();
+  const faltan = finMs - Date.now();
+  const dentroDeUnaHora = faltan > 0 && faltan <= 60*60*1000;
+  if(!dentroDeUnaHora){ banner?.classList.add('hidden'); panelAlerta?.classList.add('hidden'); return; }
+  const { data: usuarios } = await sb.from('usuarios').select('nombre,cedula,saldo').lt('saldo', 0).order('saldo', {ascending:true});
+  const negativos = usuarios || [];
+  const count = document.getElementById('admin-alerta-global-count');
+  if(count) count.textContent = negativos.length;
+  banner?.classList.remove('hidden');
+  if(panelAlerta){
+    panelAlerta.classList.remove('hidden');
+    document.getElementById('ev-saldos-negativos-body').innerHTML = negativos.map(u=>`<tr>
+      <td>${esc(u.nombre)}</td><td>${esc(u.cedula||'—')}</td>
+      <td class="mono" style="color:var(--red)">${money(u.saldo)}</td></tr>`).join('') || '<tr><td colspan="3" class="small-note">Sin saldos negativos por ahora</td></tr>';
+  }
+}
 
 async function loadResumenAdmin(){
   const { data } = await sb.from('recargas').select('*, usuarios(nombre)').order('fecha', {ascending:false}).limit(200);
@@ -891,10 +973,35 @@ async function loadResumenAdmin(){
   document.getElementById('st-efectivo').textContent = money(sum('efectivo'));
   document.getElementById('st-transferencia').textContent = money(sum('transferencia'));
   document.getElementById('st-online').textContent = money(sum('online'));
+  loadSaldosNegativosResumen();
   document.getElementById('resumen-body').innerHTML = rows.map(r=>`<tr>
     <td>${fmtDate(r.fecha)}</td><td>${esc(r.usuarios?.nombre||'—')}</td><td>${r.tipo_pago}</td>
     <td class="mono">${money(r.monto)}</td><td><span class="pill pill-${r.estado==='aprobada'?'green':(r.estado==='rechazada'?'red':'amber')}">${r.estado}</span></td>
     <td>${esc(r.cobrador_nombre||'—')}</td></tr>`).join('') || '<tr><td colspan="6" class="small-note">Sin registros</td></tr>';
+}
+
+let ultimosSaldosNegativos = [];
+async function loadSaldosNegativosResumen(){
+  const { data } = await sb.from('usuarios').select('nombre,cedula,pulsera_nfc,saldo').lt('saldo', 0).order('saldo', {ascending:true});
+  ultimosSaldosNegativos = data || [];
+  const totalDeuda = ultimosSaldosNegativos.reduce((a,u)=>a+Number(u.saldo),0);
+  const el = document.getElementById('st-saldos-negativos');
+  if(el) el.textContent = money(totalDeuda);
+}
+function mostrarClientesSaldoNegativo(){
+  const filas = ultimosSaldosNegativos.map(u=>`<tr>
+    <td>${esc(u.nombre)}</td><td>${esc(u.cedula||'—')}</td><td>${esc(u.pulsera_nfc||'—')}</td>
+    <td class="mono" style="color:var(--red)">${money(u.saldo)}</td></tr>`).join('') || '<tr><td colspan="4" class="small-note">No hay clientes con saldo negativo</td></tr>';
+  const totalDeuda = ultimosSaldosNegativos.reduce((a,u)=>a+Number(u.saldo),0);
+  showModal(`
+    <h3>Clientes con saldo negativo</h3>
+    <p class="small-note" style="margin-bottom:10px;">Estos clientes deben dinero — deuda total: <b style="color:var(--red)">${money(totalDeuda)}</b></p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Nombre</th><th>Cédula</th><th>Pulsera</th><th>Saldo</th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table></div>
+    <button class="btn btn-ghost" style="width:100%; margin-top:14px;" onclick="closeModal()">Cerrar</button>
+  `);
 }
 
 async function loadRecargasAdmin(){
@@ -1012,6 +1119,7 @@ async function openUsuarioModal(u){
     <div class="field"><label>Nombre</label><input id="um-nombre" value="${isEdit?esc(u.nombre):''}"></div>
     <div class="field"><label>Cédula</label><input id="um-cedula" value="${isEdit?esc(u.cedula):''}"></div>
     <div class="field"><label>Correo</label><input id="um-correo" value="${isEdit?esc(u.correo||''):''}"></div>
+    <div class="field"><label>Teléfono (WhatsApp)</label><input id="um-telefono" type="tel" placeholder="Ej: 3001234567" value="${isEdit?esc(u.telefono||''):''}"></div>
     <div class="field"><label>Código de acceso (4 dígitos)</label><div style="display:flex;gap:8px;"><input id="um-codigo" value="${isEdit?esc(u.codigo_acceso):gen4Digits()}"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('um-codigo').value=gen4Digits()">🎲</button></div></div>
     <div class="field">
       <label>Pulseras NFC asignadas (<span id="um-pulseras-count">${umPulserasList.length}</span>)</label>
@@ -1076,6 +1184,7 @@ async function saveUsuario(id){
     nombre: document.getElementById('um-nombre').value.trim(),
     cedula: document.getElementById('um-cedula').value.trim(),
     correo: document.getElementById('um-correo').value.trim() || null,
+    telefono: document.getElementById('um-telefono').value.trim() || null,
     codigo_acceso: document.getElementById('um-codigo').value.trim(),
     pulsera_nfc: umPulserasList[0]?.codigo || null,
   };
@@ -1098,6 +1207,8 @@ async function saveUsuario(id){
 }
 function showUserQrModal(u){
   const valorQr = (u.cedula||'').trim() || u.pulsera_nfc || u.id;
+  const qrUrlPublica = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(valorQr);
+  const tieneTelefono = !!(u.telefono && u.telefono.trim());
   showModal(`
     <h3>Código QR de ${esc(u.nombre)}</h3>
     <p class="small-note" style="margin-bottom:14px;">Compártelo con el cliente para que el cobrador lo escanee, o entrégale su código de acceso.</p>
@@ -1110,7 +1221,10 @@ function showUserQrModal(u){
       <div class="small-note">Código de acceso</div>
       <div class="small-note" style="margin-top:6px;">${u.cedula ? 'QR generado con la cédula: <span class="mono">'+esc(u.cedula)+'</span> — funciona aunque no tenga pulsera NFC asignada.' : 'Este cliente no tiene cédula registrada; el QR usa un identificador interno.'}</div>
     </div>
-    <button class="btn btn-primary" style="width:100%; margin-top:16px;" onclick="closeModal()">Listo</button>
+    ${tieneTelefono
+      ? `<button class="btn btn-green" style="width:100%; margin-top:16px;" onclick='enviarQrPorWhatsapp(${JSON.stringify(u).replace(/'/g,"&#39;")}, "${qrUrlPublica}")'>📲 Enviar QR por WhatsApp al cliente</button>`
+      : `<div class="small-note" style="margin-top:16px; color:var(--amber);">Este cliente no tiene teléfono registrado, así que no se puede enviar el QR por WhatsApp.</div>`}
+    <button class="btn btn-ghost" style="width:100%; margin-top:10px;" onclick="closeModal()">Listo</button>
   `);
   const canvas = document.getElementById('new-user-qr');
   const imgQr = document.getElementById('new-user-qr-img');
@@ -1118,7 +1232,7 @@ function showUserQrModal(u){
     if(typeof QRCode === 'undefined'){
       canvas.style.display='none';
       imgQr.onerror = ()=>toast('No se pudo generar el QR: revisa la conexión a internet.');
-      imgQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(valorQr);
+      imgQr.src = qrUrlPublica.replace('300x300','180x180');
       imgQr.style.display='';
       return;
     }
@@ -1126,16 +1240,33 @@ function showUserQrModal(u){
       QRCode.toCanvas(canvas, valorQr, { width:180, margin:1, color:{dark:'#0A0E13'} }, (err)=>{
         if(err){
           canvas.style.display='none';
-          imgQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(valorQr);
+          imgQr.src = qrUrlPublica.replace('300x300','180x180');
           imgQr.style.display='';
         }
       });
     }catch(e){
       canvas.style.display='none';
-      imgQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(valorQr);
+      imgQr.src = qrUrlPublica.replace('300x300','180x180');
       imgQr.style.display='';
     }
   }
+  if(tieneTelefono){
+    setTimeout(()=>{ toast('Registro terminado — toca "Enviar QR por WhatsApp" para mandárselo al cliente'); }, 300);
+  }
+}
+/* Deja el teléfono solo con dígitos y le agrega el indicativo de Colombia (57)
+   si viene en formato local de 10 dígitos, para que el enlace de WhatsApp funcione. */
+function formatTelWhatsapp(tel){
+  let t = (tel||'').replace(/[^\d]/g,'');
+  if(!t) return '';
+  if(t.length===10) t = '57'+t;
+  return t;
+}
+function enviarQrPorWhatsapp(u, qrUrlPublica){
+  const tel = formatTelWhatsapp(u.telefono);
+  if(!tel){ toast('Este cliente no tiene un teléfono válido registrado'); return; }
+  const mensaje = `Hola ${u.nombre}, aquí tienes tu código QR:\n${qrUrlPublica}\n\ncon este QR podras pagar en todos nuestros puntos`;
+  window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(mensaje), '_blank');
 }
 function openSaldoModal(userId){
   showModal(`
@@ -1649,7 +1780,7 @@ function mostrarClienteCobrador(cliente){
   document.getElementById('cob-charge-stage').classList.remove('hidden');
   document.getElementById('cc-photo').src = cliente.foto_url || 'https://api.dicebear.com/7.x/initials/svg?seed='+encodeURIComponent(cliente.nombre);
   document.getElementById('cc-nombre').textContent = cliente.nombre;
-  document.getElementById('cc-pulsera').textContent = cliente.pulsera_nfc || 'Sin pulsera';
+  document.getElementById('cc-pulsera').textContent = cliente.pulsera_nfc ? cliente.pulsera_nfc : ('CC ' + (cliente.cedula||'—') + ' · sin pulsera, cobro por QR/cédula');
   document.getElementById('cc-saldo').textContent = money(cliente.saldo);
   loadProductosCobrador();
 }
