@@ -318,6 +318,26 @@ tr:hover td{background:rgba(255,255,255,.02);}
 
     <!-- RECARGAS -->
     <div class="view-panel" id="av-recargas">
+      <div class="section-hd"><h3>Recarga rápida (NFC)</h3></div>
+      <div class="small-note">Escanea la pulsera del cliente, digita el valor recibido y selecciona si fue en efectivo o transferencia. Queda guardada directamente como recarga aprobada, junto con las demás recargas.</div>
+      <div class="card" style="max-width:560px; margin-top:10px;">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <button class="nfc-btn" onclick="recRapidaEscanearPulsera()">📶 Escanear pulsera</button>
+          <span id="rec-rapida-cliente" class="small-note">Ninguna pulsera escaneada todavía</span>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+          <div class="field" style="flex:1; min-width:140px;"><label>Valor a cargar</label><input id="rec-rapida-monto" type="number" min="0" placeholder="Ej: 20000"></div>
+          <div class="field" style="flex:1; min-width:140px;"><label>Método de pago</label>
+            <select id="rec-rapida-tipo">
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="width:100%; margin-top:8px;" onclick="guardarRecargaRapida()">💾 Registrar recarga</button>
+      </div>
+
+      <div class="section-hd" style="margin-top:22px;"><h3>Historial de recargas</h3></div>
       <div class="search-row">
         <input id="rec-filtro" placeholder="Filtrar por cliente, cédula, correo o pulsera...">
         <select id="rec-filtro-estado"><option value="">Todos los estados</option><option value="pendiente">Pendiente</option><option value="aprobada">Aprobada</option><option value="rechazada">Rechazada</option></select>
@@ -655,7 +675,7 @@ function setUserTab(t){
   if(t==='chat') loadChatUsuario();
 }
 
-function flipWallet(){ document.getElementById('wallet-card').classList.toggle('flipped'); }
+function flipWallet(){ document.getElementById('wallet-card').classList.toggle('flipped'); loadConsumosWallet(); }
 
 async function renderUserProfile(){
   const u = state.usuario;
@@ -663,14 +683,20 @@ async function renderUserProfile(){
   document.getElementById('w-pulsera').textContent = 'PULSERA · ' + (u.pulsera_nfc || 'Sin asignar');
   document.getElementById('w-saldo').textContent = money(u.saldo);
   document.getElementById('w-photo').src = u.foto_url || 'https://api.dicebear.com/7.x/initials/svg?seed=' + encodeURIComponent(u.nombre);
-  QRCode.toCanvas(document.getElementById('user-qr-canvas'), u.id, { width:150, margin:1, color:{dark:'#0A0E13'} }, (err)=>{ if(err) console.error('QR error:', err); });
-
-  const { data: consumos } = await sb.from('consumos').select('*').eq('usuario_id', u.id).order('fecha', {ascending:false}).limit(40);
+  QRCode.toCanvas(document.getElementById('user-qr-canvas'), u.pulsera_nfc || u.id, { width:150, margin:1, color:{dark:'#0A0E13'} }, (err)=>{ if(err) console.error('QR error:', err); });
+  await loadConsumosWallet();
+}
+/* Consumos recientes que se muestran al girar la tarjeta. Se separa en su
+   propia función para poder refrescarla cada vez que el usuario voltea la
+   tarjeta (no solo al iniciar sesión), por si hubo consumos nuevos mientras
+   la app seguía abierta. */
+async function loadConsumosWallet(){
   const cont = document.getElementById('w-consumos');
-  if(!consumos || !consumos.length){ cont.innerHTML = '<div class="small-note">Aún no tienes consumos</div>'; }
-  else {
-    cont.innerHTML = consumos.map(c=>`<div class="consumo-row"><div><b>${esc(c.producto_nombre)}</b><br><span style="color:var(--muted)">x${c.cantidad} · ${esc(c.pulsera_nfc||'')}</span></div><div class="mono">${money(c.valor_total)}</div></div>`).join('');
-  }
+  if(!state.usuario) return;
+  const { data: consumos, error } = await sb.from('consumos').select('*').eq('usuario_id', state.usuario.id).order('fecha', {ascending:false}).limit(40);
+  if(error){ cont.innerHTML = '<div class="small-note">No se pudieron cargar los consumos: '+esc(error.message)+'</div>'; return; }
+  if(!consumos || !consumos.length){ cont.innerHTML = '<div class="small-note">Aún no tienes consumos</div>'; return; }
+  cont.innerHTML = consumos.map(c=>`<div class="consumo-row"><div><b>${esc(c.producto_nombre)}</b><br><span style="color:var(--muted)">${fmtDate(c.fecha)} · x${c.cantidad}</span></div><div class="mono">${money(c.valor_total)}</div></div>`).join('');
 }
 
 async function refreshUsuarioSaldo(){
@@ -800,7 +826,7 @@ function setAdminTab(t){
   document.querySelectorAll('#admin-app .view-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('av-'+t).classList.add('active');
   if(t==='resumen') loadResumenAdmin();
-  if(t==='recargas') loadRecargasAdmin();
+  if(t==='recargas'){ loadRecargasAdmin(); recRapidaCliente=null; const rc=document.getElementById('rec-rapida-cliente'); if(rc) rc.textContent='Ninguna pulsera escaneada todavía'; }
   if(t==='usuarios') loadUsuariosAdmin();
   if(t==='inventario') loadProductosAdmin();
   if(t==='cobradores') loadCobradoresAdmin();
@@ -851,6 +877,43 @@ async function aprobarRecarga(id){
   await sb.from('recargas').update({ estado:'aprobada', aprobado_por:'admin', fecha_aprobacion:new Date().toISOString() }).eq('id', id);
   toast('Recarga aprobada'); loadRecargasAdmin(); loadResumenAdmin();
 }
+
+/* ---- Recarga rápida (NFC) en la pestaña Recargas ---- */
+let recRapidaCliente = null;
+async function recRapidaEscanearPulsera(){
+  await iniciarLecturaCompletaNFC(async ({serial, texto})=>{
+    const candidatos = [texto, serial].map(v=>(v||'').trim()).filter(Boolean);
+    let cliente = null;
+    for(const c of candidatos){ cliente = await buscarUsuarioPorValor(c); if(cliente) break; }
+    if(!cliente){
+      recRapidaCliente = null;
+      document.getElementById('rec-rapida-cliente').innerHTML = '<span style="color:var(--red)">⚠ Pulsera no reconocida — sin cliente registrado</span>';
+      toast('No se encontró ningún cliente con esa pulsera');
+      return;
+    }
+    recRapidaCliente = cliente;
+    document.getElementById('rec-rapida-cliente').innerHTML = `<b style="color:var(--text)">${esc(cliente.nombre)}</b> · CC ${esc(cliente.cedula)} · Saldo actual: ${money(cliente.saldo)}`;
+    toast('Cliente encontrado: ' + cliente.nombre);
+  });
+}
+async function guardarRecargaRapida(){
+  if(!recRapidaCliente){ toast('Primero escanea la pulsera del cliente'); return; }
+  const monto = Number(document.getElementById('rec-rapida-monto').value);
+  const tipo = document.getElementById('rec-rapida-tipo').value;
+  if(!monto || monto<=0){ toast('Ingresa un valor válido'); return; }
+  const cliente = recRapidaCliente;
+  const nuevoSaldo = Number(cliente.saldo) + monto;
+  const { error } = await sb.from('recargas').insert({ usuario_id: cliente.id, tipo_pago: tipo, monto, estado:'aprobada', aprobado_por:'admin', fecha_aprobacion:new Date().toISOString() });
+  if(error){ toast('Error al guardar la recarga: '+error.message); return; }
+  await sb.from('usuarios').update({ saldo: nuevoSaldo }).eq('id', cliente.id);
+  await sb.from('movimientos_saldo').insert({ usuario_id: cliente.id, tipo:'recarga_'+tipo, monto, saldo_anterior:cliente.saldo, saldo_nuevo:nuevoSaldo, realizado_por:'admin', detalle:'Recarga rápida (NFC)' });
+  toast('Recarga de ' + money(monto) + ' registrada para ' + cliente.nombre);
+  document.getElementById('rec-rapida-monto').value = '';
+  recRapidaCliente = null;
+  document.getElementById('rec-rapida-cliente').innerHTML = 'Ninguna pulsera escaneada todavía';
+  loadRecargasAdmin(); loadResumenAdmin();
+}
+
 async function rechazarRecarga(id){
   await sb.from('recargas').update({ estado:'rechazada', aprobado_por:'admin', fecha_aprobacion:new Date().toISOString() }).eq('id', id);
   toast('Recarga rechazada'); loadRecargasAdmin();
@@ -986,6 +1049,7 @@ async function saveUsuario(id){
   if(!id && savedUser && savedUser.id){ showUserQrModal(savedUser); }
 }
 function showUserQrModal(u){
+  const valorQr = u.pulsera_nfc || u.id;
   showModal(`
     <h3>Código QR de ${esc(u.nombre)}</h3>
     <p class="small-note" style="margin-bottom:14px;">Compártelo con el cliente para que el cobrador lo escanee, o entrégale su código de acceso.</p>
@@ -993,12 +1057,13 @@ function showUserQrModal(u){
       <div class="qr-box" style="display:inline-block;"><canvas id="new-user-qr"></canvas></div>
       <div style="margin-top:12px; font-family:var(--mono); font-size:24px; font-weight:700; letter-spacing:.12em; color:var(--green);">${esc(u.codigo_acceso||'----')}</div>
       <div class="small-note">Código de acceso</div>
+      <div class="small-note" style="margin-top:6px;">${u.pulsera_nfc ? 'QR generado con la pulsera NFC: <span class="mono">'+esc(u.pulsera_nfc)+'</span>' : 'Este cliente aún no tiene pulsera NFC asignada; el QR usa su ID interno. Asígnale una pulsera para que el QR use su serial.'}</div>
     </div>
     <button class="btn btn-primary" style="width:100%; margin-top:16px;" onclick="closeModal()">Listo</button>
   `);
   const canvas = document.getElementById('new-user-qr');
-  if(canvas && u.id){
-    QRCode.toCanvas(canvas, u.id, { width:180, margin:1, color:{dark:'#0A0E13'} }, (err)=>{ if(err) toast('No se pudo generar el QR: '+err.message); });
+  if(canvas && valorQr){
+    QRCode.toCanvas(canvas, valorQr, { width:180, margin:1, color:{dark:'#0A0E13'} }, (err)=>{ if(err) toast('No se pudo generar el QR: '+err.message); });
   }
 }
 function openSaldoModal(userId){
