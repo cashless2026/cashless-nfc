@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{
@@ -306,6 +307,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
     <button class="tab-btn" data-t="cobradores" onclick="setAdminTab('cobradores')">Cobradores</button>
     <button class="tab-btn" data-t="nfc" onclick="setAdminTab('nfc')">Lector/Escritor NFC</button>
     <button class="tab-btn" data-t="chat" onclick="setAdminTab('chat')">Chat</button>
+    <button class="tab-btn" data-t="liquidar" onclick="setAdminTab('liquidar')">Liquidar cliente</button>
     <button class="tab-btn" data-t="evento" onclick="setAdminTab('evento')">Evento</button>
     <button class="tab-btn" data-t="config" onclick="setAdminTab('config')">Configuración</button>
   </div>
@@ -451,6 +453,51 @@ tr:hover td{background:rgba(255,255,255,.02);}
               <button class="btn btn-primary btn-sm" onclick="sendAdminChat()">Enviar</button>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIQUIDAR CLIENTE -->
+    <div class="view-panel" id="av-liquidar">
+      <div class="section-hd"><h3>Liquidar cliente</h3></div>
+      <div class="small-note">Busca al cliente y genera un consolidado con sus recargas y su consumo de productos/servicios (cantidad, valor unitario, pulsera o QR usado, fecha, hora y cobrador), listo para descargar en PDF.</div>
+      <div class="search-row" style="margin-top:12px;">
+        <input id="liq-filtro" placeholder="Buscar por nombre, cédula, correo o pulsera..." onkeydown="if(event.key==='Enter')buscarClienteLiquidar()">
+        <button class="nfc-btn" onclick="scanNfcInto('liq-filtro')">📶 NFC</button>
+        <button class="btn btn-ghost" onclick="buscarClienteLiquidar()">Buscar</button>
+      </div>
+      <div id="liq-resultados" style="margin-top:10px;"></div>
+
+      <div id="liq-consolidado" class="hidden" style="margin-top:22px;">
+        <div class="section-hd">
+          <h3>Consolidado de <span id="liq-nombre-cliente"></span></h3>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <select id="liq-formato-pdf">
+              <option value="carta">Hoja tamaño carta</option>
+              <option value="termica">Impresora térmica 58mm</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="descargarLiquidacionPDF()">⬇️ Descargar PDF</button>
+            <button class="btn btn-green btn-sm" onclick="enviarLiquidacionPorWhatsapp()">📲 Enviar por WhatsApp</button>
+          </div>
+        </div>
+        <div class="small-note" id="liq-saldo-actual" style="margin-bottom:10px;"></div>
+
+        <div class="card">
+          <h3 style="margin-bottom:10px;">Recargas realizadas</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Estado</th></tr></thead>
+            <tbody id="liq-recargas-body"></tbody>
+          </table></div>
+          <div style="text-align:right; margin-top:8px; font-weight:700;">Total recargado: <span class="mono" id="liq-total-recargas">$0</span></div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+          <h3 style="margin-bottom:10px;">Consumo de productos / servicios</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Producto/servicio</th><th>Cant.</th><th>Valor unit.</th><th>Valor total</th><th>Pulsera/QR</th><th>Fecha y hora</th><th>Cobrador</th></tr></thead>
+            <tbody id="liq-consumos-body"></tbody>
+          </table></div>
+          <div style="text-align:right; margin-top:8px; font-weight:700;">Total consumido: <span class="mono" id="liq-total-consumos">$0</span></div>
         </div>
       </div>
     </div>
@@ -910,6 +957,7 @@ function setAdminTab(t){
   if(t==='cobradores') loadCobradoresAdmin();
   if(t==='nfc'){ nfcTabPulseraActual=null; document.getElementById('nfc-tab-pulsera-actual').textContent='Ninguna pulsera escaneada todavía'; renderNfcPendientes(); }
   if(t==='chat') loadAdminChatList();
+  if(t==='liquidar'){ document.getElementById('liq-resultados').innerHTML=''; document.getElementById('liq-consolidado').classList.add('hidden'); document.getElementById('liq-filtro').value=''; }
   if(t==='evento'){ loadHorarioEvento(); checkEventoAlerta(); }
   if(t==='config') loadConfigAdmin();
 }
@@ -1890,6 +1938,216 @@ function showResultFlash(ok){
     <h2>${ok?'Cobro exitoso':'Cobro registrado sin saldo suficiente'}</h2>
   </div>`;
   setTimeout(()=>{ document.getElementById('modal-root').innerHTML=''; resetCobradorScan(); }, 1800);
+}
+
+/* ============================================================
+   LIQUIDAR CLIENTE
+   ============================================================ */
+let liqClienteActual = null;
+let liqDatosConsolidado = null;
+
+async function buscarClienteLiquidar(){
+  const f = (document.getElementById('liq-filtro').value||'').trim().toLowerCase();
+  const cont = document.getElementById('liq-resultados');
+  if(!f){ cont.innerHTML=''; return; }
+  const { data } = await sb.from('usuarios').select('id,nombre,cedula,correo,pulsera_nfc,saldo').limit(500);
+  const rows = (data||[]).filter(u=>
+    (u.nombre||'').toLowerCase().includes(f) ||
+    (u.cedula||'').includes(f) ||
+    (u.correo||'').toLowerCase().includes(f) ||
+    (u.pulsera_nfc||'').toLowerCase().includes(f)
+  );
+  if(!rows.length){ cont.innerHTML = '<div class="small-note">No se encontraron clientes con ese criterio</div>'; return; }
+  cont.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>Nombre</th><th>Cédula</th><th>Pulsera</th><th>Saldo</th><th></th></tr></thead>
+    <tbody>${rows.map(u=>`<tr>
+      <td>${esc(u.nombre)}</td><td>${esc(u.cedula||'—')}</td><td class="mono">${esc(u.pulsera_nfc||'—')}</td>
+      <td class="mono" style="${Number(u.saldo)<0?'color:var(--red)':''}">${money(u.saldo)}</td>
+      <td><button class="btn btn-primary btn-sm" onclick='generarConsolidadoLiquidacion(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Generar consolidado</button></td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+async function generarConsolidadoLiquidacion(u){
+  liqClienteActual = u;
+  const [{ data: recargas }, { data: consumos }] = await Promise.all([
+    sb.from('recargas').select('*').eq('usuario_id', u.id).order('fecha', {ascending:false}),
+    sb.from('consumos').select('*').eq('usuario_id', u.id).order('fecha', {ascending:false}),
+  ]);
+  const recargasRows = recargas || [];
+  const consumosRows = consumos || [];
+  const totalRecargas = recargasRows.filter(r=>r.estado==='aprobada').reduce((a,r)=>a+Number(r.monto),0);
+  const totalConsumos = consumosRows.reduce((a,c)=>a+Number(c.valor_total),0);
+  liqDatosConsolidado = { cliente:u, recargas:recargasRows, consumos:consumosRows, totalRecargas, totalConsumos };
+
+  document.getElementById('liq-nombre-cliente').textContent = u.nombre;
+  document.getElementById('liq-saldo-actual').textContent = `Cédula: ${u.cedula||'—'} · Saldo actual: ${money(u.saldo)}`;
+  document.getElementById('liq-recargas-body').innerHTML = recargasRows.map(r=>`<tr>
+    <td>${fmtDate(r.fecha)}</td><td>${esc(r.tipo_pago)}</td><td class="mono">${money(r.monto)}</td>
+    <td><span class="pill pill-${r.estado==='aprobada'?'green':(r.estado==='rechazada'?'red':'amber')}">${r.estado}</span></td>
+  </tr>`).join('') || '<tr><td colspan="4" class="small-note">Sin recargas registradas</td></tr>';
+  document.getElementById('liq-total-recargas').textContent = money(totalRecargas);
+  document.getElementById('liq-consumos-body').innerHTML = consumosRows.map(c=>`<tr>
+    <td>${esc(c.producto_nombre)}</td><td class="mono">${c.cantidad}</td><td class="mono">${money(c.valor_unitario)}</td>
+    <td class="mono">${money(c.valor_total)}</td><td class="mono">${esc(c.pulsera_nfc||'QR/cédula')}</td>
+    <td>${fmtDate(c.fecha)}</td><td>${esc(c.cobrador_nombre||'—')}</td>
+  </tr>`).join('') || '<tr><td colspan="7" class="small-note">Sin consumos registrados</td></tr>';
+  document.getElementById('liq-total-consumos').textContent = money(totalConsumos);
+  document.getElementById('liq-consolidado').classList.remove('hidden');
+  document.getElementById('liq-consolidado').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+/* Los navegadores no dan acceso a JS para "detectar" qué impresora física
+   está conectada (es una restricción de seguridad del navegador). En su
+   lugar se deja elegir el formato de la hoja: carta (para impresoras
+   normales) o térmica de 58mm (para impresoras de recibos/POS); cada uno
+   ajusta el tamaño de página del PDF generado. */
+/* El enlace de WhatsApp (wa.me) solo admite texto, no adjuntar un PDF
+   automáticamente sin una API de pago — se envía un resumen del
+   consolidado como mensaje; si el cliente quiere el PDF completo,
+   se le puede descargar y enviar manualmente como adjunto. */
+function enviarLiquidacionPorWhatsapp(){
+  if(!liqDatosConsolidado){ toast('Primero genera el consolidado del cliente'); return; }
+  const { cliente, totalRecargas, totalConsumos, consumos } = liqDatosConsolidado;
+  const tel = formatTelWhatsapp(cliente.telefono);
+  if(!tel){ toast('Este cliente no tiene un teléfono válido registrado'); return; }
+  const mensaje = `Hola ${cliente.nombre}, este es el resumen de tu liquidación:\n\n`+
+    `Total recargado: ${money(totalRecargas)}\n`+
+    `Total consumido: ${money(totalConsumos)} (${consumos.length} ${consumos.length===1?'producto/servicio':'productos/servicios'})\n`+
+    `Saldo actual: ${money(cliente.saldo)}\n\n`+
+    `Cualquier duda con el detalle, con gusto te la resolvemos.`;
+  window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(mensaje), '_blank');
+}
+
+function descargarLiquidacionPDF(){
+  if(!liqDatosConsolidado){ toast('Primero genera el consolidado del cliente'); return; }
+  if(typeof window.jspdf === 'undefined'){ toast('No se pudo cargar el generador de PDF: revisa la conexión a internet.'); return; }
+  const formato = document.getElementById('liq-formato-pdf').value;
+  if(formato==='termica') generarPdfTermica(liqDatosConsolidado);
+  else generarPdfCarta(liqDatosConsolidado);
+}
+
+function generarPdfCarta({ cliente, recargas, consumos, totalRecargas, totalConsumos }){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'letter' });
+  const marginX = 40; let y = 50;
+  const pageH = doc.internal.pageSize.getHeight();
+  const pageW = doc.internal.pageSize.getWidth();
+  const checkPageBreak = (needed)=>{ if(y+needed > pageH-40){ doc.addPage(); y = 50; } };
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('Liquidación de cliente — GLM Eventos', marginX, y); y += 24;
+  doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
+  doc.text('Generado: '+new Date().toLocaleString('es-CO'), marginX, y); y += 22;
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(12);
+  doc.text('Cliente: '+(cliente.nombre||''), marginX, y); y += 16;
+  doc.setFont('helvetica','normal'); doc.setFontSize(10.5);
+  doc.text('Cédula: '+(cliente.cedula||'—')+'    Pulsera: '+(cliente.pulsera_nfc||'—'), marginX, y); y += 14;
+  doc.text('Saldo actual: '+money(cliente.saldo), marginX, y); y += 26;
+
+  const drawTableHeader = (cols)=>{
+    doc.setFont('helvetica','bold'); doc.setFontSize(9.5);
+    doc.setFillColor(240,240,240);
+    doc.rect(marginX, y-11, pageW-marginX*2, 16, 'F');
+    let x = marginX+4;
+    cols.forEach(c=>{ doc.text(c.label, x, y); x += c.w; });
+    y += 12;
+    doc.setFont('helvetica','normal');
+  };
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('Recargas realizadas', marginX, y); y += 16;
+  const colsRec = [{label:'Fecha',w:130},{label:'Tipo',w:100},{label:'Monto',w:90},{label:'Estado',w:90}];
+  drawTableHeader(colsRec);
+  doc.setFontSize(9.5);
+  (recargas.length?recargas:[null]).forEach(r=>{
+    checkPageBreak(14);
+    if(!r){ doc.text('Sin recargas registradas', marginX+4, y); y+=14; return; }
+    let x = marginX+4;
+    doc.text(fmtDate(r.fecha)||'', x, y); x+=colsRec[0].w;
+    doc.text(String(r.tipo_pago||''), x, y); x+=colsRec[1].w;
+    doc.text(money(r.monto), x, y); x+=colsRec[2].w;
+    doc.text(String(r.estado||''), x, y);
+    y += 14;
+  });
+  checkPageBreak(20);
+  doc.setFont('helvetica','bold');
+  doc.text('Total recargado: '+money(totalRecargas), marginX, y); y += 26;
+
+  checkPageBreak(30);
+  doc.setFontSize(13);
+  doc.text('Consumo de productos / servicios', marginX, y); y += 16;
+  const colsCons = [{label:'Producto/servicio',w:120},{label:'Cant.',w:35},{label:'V.Unit',w:60},{label:'V.Total',w:60},{label:'Pulsera/QR',w:75},{label:'Fecha y hora',w:100},{label:'Cobrador',w:60}];
+  drawTableHeader(colsCons);
+  doc.setFontSize(8.7);
+  (consumos.length?consumos:[null]).forEach(c=>{
+    checkPageBreak(14);
+    if(!c){ doc.text('Sin consumos registrados', marginX+4, y); y+=14; return; }
+    let x = marginX+4;
+    doc.text(String(c.producto_nombre||'').slice(0,22), x, y); x+=colsCons[0].w;
+    doc.text(String(c.cantidad||0), x, y); x+=colsCons[1].w;
+    doc.text(money(c.valor_unitario), x, y); x+=colsCons[2].w;
+    doc.text(money(c.valor_total), x, y); x+=colsCons[3].w;
+    doc.text(String(c.pulsera_nfc||'QR/cédula').slice(0,14), x, y); x+=colsCons[4].w;
+    doc.text(fmtDate(c.fecha)||'', x, y); x+=colsCons[5].w;
+    doc.text(String(c.cobrador_nombre||'—').slice(0,14), x, y);
+    y += 14;
+  });
+  checkPageBreak(20);
+  doc.setFont('helvetica','bold'); doc.setFontSize(10.5);
+  doc.text('Total consumido: '+money(totalConsumos), marginX, y); y += 18;
+  doc.text('Saldo actual del cliente: '+money(cliente.saldo), marginX, y);
+
+  doc.save(`liquidacion_${(cliente.nombre||'cliente').replace(/[^\w]+/g,'_')}.pdf`);
+}
+
+function generarPdfTermica({ cliente, recargas, consumos, totalRecargas, totalConsumos }){
+  const { jsPDF } = window.jspdf;
+  const widthMm = 58;
+  // Altura estimada según cantidad de líneas, para que el recibo no quede con espacio de sobra ni corte contenido.
+  const lineas = 14 + recargas.length*2 + consumos.length*3 + (recargas.length?0:1) + (consumos.length?0:1);
+  const heightMm = Math.max(80, lineas*4.2 + 20);
+  const doc = new jsPDF({ unit:'mm', format:[widthMm, heightMm] });
+  const marginX = 3; let y = 8; const maxW = widthMm - marginX*2;
+  const line = (txt, opts={})=>{
+    doc.setFont('courier', opts.bold?'bold':'normal');
+    doc.setFontSize(opts.size||7.5);
+    doc.text(String(txt), opts.center? widthMm/2 : marginX, y, opts.center?{align:'center'}:undefined);
+    y += opts.gap || 3.6;
+  };
+  const separador = ()=>{ doc.setLineWidth(0.1); doc.line(marginX,y,widthMm-marginX,y); y+=3; };
+
+  line('GLM EVENTOS', {bold:true, size:9.5, center:true, gap:4});
+  line('Liquidación de cliente', {size:7.5, center:true, gap:4.5});
+  separador();
+  line('Cliente: '+(cliente.nombre||''), {bold:true});
+  line('Cédula: '+(cliente.cedula||'—'));
+  line('Pulsera: '+(cliente.pulsera_nfc||'—'));
+  line('Fecha: '+new Date().toLocaleString('es-CO'));
+  separador();
+
+  line('RECARGAS', {bold:true, gap:4});
+  if(!recargas.length) line('Sin recargas registradas');
+  recargas.forEach(r=>{
+    line(fmtDate(r.fecha));
+    line('  '+r.tipo_pago+' · '+money(r.monto)+' · '+r.estado);
+  });
+  separador();
+  line('Total recargado: '+money(totalRecargas), {bold:true, gap:4.5});
+  separador();
+
+  line('CONSUMOS', {bold:true, gap:4});
+  if(!consumos.length) line('Sin consumos registrados');
+  consumos.forEach(c=>{
+    line(c.producto_nombre+' x'+c.cantidad+' = '+money(c.valor_total));
+    line('  V.unit '+money(c.valor_unitario)+' · '+(c.pulsera_nfc||'QR/cédula'));
+    line('  '+fmtDate(c.fecha)+' · '+(c.cobrador_nombre||'—'));
+  });
+  separador();
+  line('Total consumido: '+money(totalConsumos), {bold:true, gap:4.5});
+  line('Saldo actual: '+money(cliente.saldo), {bold:true, gap:4.5});
+
+  doc.save(`liquidacion_${(cliente.nombre||'cliente').replace(/[^\w]+/g,'_')}_termica.pdf`);
 }
 
 /* Init */
