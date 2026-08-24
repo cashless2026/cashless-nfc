@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>WAVE · Billetera Cashless</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root{
+  --ink:#0A0E13; --panel:#111820; --panel2:#161F2B; --raise:#1C2733;
+  --line:#26323F; --text:#EAF1F7; --muted:#8CA0B3; --dim:#5A6B7A;
+  --accent:#5B8CFF; --accent2:#8FB2FF; --green:#33D68B; --green-dim:#173328;
+  --red:#FF5468; --red-dim:#3A1620; --amber:#FFB020; --amber-dim:#3A2A10;
+  --radius:18px; --radius-sm:12px;
+  --disp:'Space Grotesk',sans-serif; --body:'Inter',sans-serif; --mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+body{background:radial-gradient(circle at 15% -10%, #16202c 0%, var(--ink) 55%); color:var(--text); font-family:var(--body); min-height:100vh; -webkit-font-smoothing:antialiased;}
+::-webkit-scrollbar{width:8px; height:8px;} ::-webkit-scrollbar-thumb{background:var(--line); border-radius:8px;}
+h1,h2,h3,.disp{font-family:var(--disp);}
+.mono{font-family:var(--mono);}
+button{font-family:var(--body); cursor:pointer;}
+input,select,textarea{font-family:var(--body); background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:10px; padding:11px 13px; font-size:14.5px; outline:none; width:100%;}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+label{font-size:12.5px; color:var(--muted); font-weight:600; letter-spacing:.02em; display:block; margin-bottom:6px;}
+.field{margin-bottom:14px;}
+.btn{border:none; border-radius:12px; padding:12px 18px; font-weight:700; font-size:14.5px; transition:.15s; letter-spacing:.01em;}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#3E68D6); color:#fff;}
+.btn-primary:hover{filter:brightness(1.1);}
+.btn-ghost{background:var(--panel2); color:var(--text); border:1px solid var(--line);}
+.btn-ghost:hover{border-color:var(--accent);}
+.btn-green{background:linear-gradient(135deg,var(--green),#1FAE71); color:#04140C;}
+.btn-red{background:linear-gradient(135deg,var(--red),#C5324A); color:#fff;}
+.btn-sm{padding:8px 12px; font-size:13px; border-radius:9px;}
+.btn:disabled{opacity:.45; cursor:not-allowed;}
+.hidden{display:none !important;}
+.pill{display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:99px; font-size:11.5px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;}
+.pill-green{background:var(--green-dim); color:var(--green);}
+.pill-amber{background:var(--amber-dim); color:var(--amber);}
+.pill-red{background:var(--red-dim); color:var(--red);}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:20px;}
+.wave-bg{background-image:radial-gradient(circle, rgba(91,140,255,.35) 1px, transparent 1px); background-size:16px 16px;}
+
+/* ---------- LOGIN ---------- */
+#login-screen{min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;}
+.login-box{width:100%; max-width:420px;}
+.brand{display:flex; align-items:center; gap:10px; justify-content:center; margin-bottom:28px;}
+.brand-mark{width:38px; height:38px; border-radius:11px; background:linear-gradient(135deg,var(--accent),var(--green)); display:flex; align-items:center; justify-content:center; font-weight:800; font-family:var(--disp);}
+.brand-name{font-family:var(--disp); font-size:22px; font-weight:700; letter-spacing:.02em;}
+.role-tabs{display:flex; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:4px; margin-bottom:20px;}
+.role-tab{flex:1; text-align:center; padding:10px 8px; border-radius:11px; font-size:13px; font-weight:700; color:var(--muted); transition:.15s;}
+.role-tab.active{background:var(--raise); color:var(--text); box-shadow:inset 0 0 0 1px var(--line);}
+.login-panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:26px;}
+.login-panel h2{font-size:18px; margin-bottom:4px;}
+.login-sub{color:var(--muted); font-size:13px; margin-bottom:20px;}
+.link-btn{background:none; border:none; color:var(--accent2); font-size:12.5px; font-weight:600; padding:0; text-decoration:underline;}
+.err-msg{color:var(--red); font-size:12.5px; margin-top:8px; min-height:16px;}
+
+/* ---------- APP SHELL ---------- */
+.app-shell{min-height:100vh; display:flex; flex-direction:column;}
+.topbar{display:flex; align-items:center; justify-content:space-between; padding:14px 22px; border-bottom:1px solid var(--line); background:rgba(17,24,32,.85); backdrop-filter:blur(10px); position:sticky; top:0; z-index:40;}
+.topbar-left{display:flex; align-items:center; gap:10px;}
+.tabbar{display:flex; gap:6px; padding:10px 22px; overflow-x:auto; border-bottom:1px solid var(--line); background:var(--panel);}
+.tab-btn{white-space:nowrap; background:none; border:1px solid transparent; color:var(--muted); font-weight:700; font-size:13.5px; padding:9px 15px; border-radius:10px;}
+.tab-btn.active{background:var(--raise); color:var(--text); border-color:var(--line);}
+.view{padding:22px; max-width:1100px; margin:0 auto; width:100%;}
+.view-panel{display:none;} .view-panel.active{display:block;}
+.logout-btn{background:none; border:1px solid var(--line); color:var(--muted); border-radius:10px; padding:8px 12px; font-size:12.5px; font-weight:700;}
+
+/* ---------- USER: WALLET CARD ---------- */
+.wallet-scene{perspective:1400px; max-width:400px; margin:0 auto 22px;}
+.wallet-card{position:relative; width:100%; aspect-ratio:1.586; transform-style:preserve-3d; transition:transform .6s cubic-bezier(.2,.8,.2,1); cursor:pointer;}
+.wallet-card.flipped{transform:rotateY(180deg);}
+.wallet-face{position:absolute; inset:0; backface-visibility:hidden; border-radius:20px; padding:20px; overflow:hidden; box-shadow:0 20px 45px -18px rgba(0,0,0,.65);}
+.wallet-front{background:linear-gradient(150deg,#17202b 0%, #0e141c 65%); border:1px solid #2a3644; display:flex; flex-direction:column; justify-content:space-between;}
+.wallet-front::after{content:''; position:absolute; width:260px; height:260px; border-radius:50%; border:1px solid rgba(91,140,255,.15); top:-90px; right:-90px;}
+.wallet-front::before{content:''; position:absolute; width:180px; height:180px; border-radius:50%; border:1px solid rgba(51,214,139,.15); bottom:-70px; left:-70px;}
+.wallet-top{display:flex; justify-content:space-between; align-items:flex-start; position:relative; z-index:2;}
+.wallet-chip{width:38px; height:28px; border-radius:6px; background:linear-gradient(135deg,#e7cf8a,#b89345);}
+.wallet-nfc-icon{opacity:.7;}
+.wallet-mid{display:flex; align-items:center; gap:12px; position:relative; z-index:2;}
+.wallet-photo{width:50px; height:50px; border-radius:12px; object-fit:cover; border:1px solid var(--line); background:var(--raise);}
+.wallet-name{font-family:var(--disp); font-size:15.5px; font-weight:700;}
+.wallet-bracelet{font-family:var(--mono); font-size:11.5px; color:var(--muted); letter-spacing:.06em;}
+.wallet-balance{position:relative; z-index:2;}
+.wallet-balance .lbl{font-size:10.5px; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; font-weight:700;}
+.wallet-balance .val{font-family:var(--mono); font-size:32px; font-weight:700; color:var(--green);}
+.wallet-back{background:var(--panel2); border:1px solid var(--line); transform:rotateY(180deg); display:flex; flex-direction:column;}
+.wallet-back-hd{font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;}
+.consumo-row{display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px dashed var(--line); font-size:12.5px;}
+.consumo-row:last-child{border-bottom:none;}
+.consumo-list{overflow-y:auto; flex:1;}
+.flip-hint{text-align:center; font-size:11.5px; color:var(--dim); margin-bottom:20px;}
+.qr-box{background:#fff; border-radius:12px; padding:8px; display:inline-block;}
+
+/* ---------- GRIDS / TABLES ---------- */
+.grid-2{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+.grid-3{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+@media(max-width:720px){.grid-3{grid-template-columns:1fr 1fr;} .grid-2{grid-template-columns:1fr;}}
+.stat-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-sm); padding:16px;}
+.stat-lbl{font-size:11.5px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.05em;}
+.stat-val{font-family:var(--mono); font-size:24px; font-weight:700; margin-top:4px;}
+.prod-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-sm); padding:14px; display:flex; flex-direction:column; gap:6px;}
+.prod-name{font-weight:700; font-size:14.5px;}
+.prod-price{font-family:var(--mono); color:var(--green); font-weight:700;}
+.prod-stock{font-size:11.5px; color:var(--muted);}
+table{width:100%; border-collapse:collapse; font-size:13px;}
+th{text-align:left; padding:9px 10px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid var(--line);}
+td{padding:9px 10px; border-bottom:1px solid var(--line);}
+tr:hover td{background:rgba(255,255,255,.02);}
+.table-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius-sm);}
+.section-hd{display:flex; justify-content:space-between; align-items:center; margin:22px 0 12px; flex-wrap:wrap; gap:10px;}
+.section-hd h3{font-size:16px;}
+.search-row{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;}
+.search-row input,.search-row select{width:auto; flex:1; min-width:140px;}
+.nfc-btn{background:var(--raise); border:1px solid var(--accent); color:var(--accent2); border-radius:10px; padding:11px 14px; font-weight:700; display:flex; align-items:center; gap:6px; font-size:13px;}
+
+/* ---------- MODAL ---------- */
+.modal-overlay{position:fixed; inset:0; background:rgba(5,8,12,.72); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;}
+.modal-box{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:24px; width:100%; max-width:440px; max-height:90vh; overflow-y:auto;}
+.modal-box h3{font-size:17px; margin-bottom:14px;}
+.modal-close{float:right; background:none; border:none; color:var(--muted); font-size:20px; line-height:1;}
+.choice-row{display:flex; gap:10px; margin-bottom:14px;}
+.choice-btn{flex:1; border:1px solid var(--line); background:var(--panel2); border-radius:12px; padding:14px 10px; text-align:center; font-weight:700; font-size:13.5px;}
+.choice-btn.active{border-color:var(--accent); background:rgba(91,140,255,.12); color:var(--accent2);}
+
+/* ---------- CHAT ---------- */
+.chat-wrap{display:flex; flex-direction:column; height:460px; border:1px solid var(--line); border-radius:var(--radius-sm); overflow:hidden;}
+.chat-msgs{flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; background:var(--panel2);}
+.msg{max-width:75%; padding:9px 12px; border-radius:12px; font-size:13px;}
+.msg-user{align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:3px;}
+.msg-admin{align-self:flex-start; background:var(--raise); border:1px solid var(--line); border-bottom-left-radius:3px;}
+.msg img{max-width:180px; border-radius:8px; margin-top:6px; display:block;}
+.chat-input{display:flex; gap:8px; padding:10px; border-top:1px solid var(--line); background:var(--panel);}
+
+/* ---------- COBRADOR ---------- */
+.scan-scene{text-align:center; padding:10px 0 26px;}
+.scan-choice{display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-bottom:20px;}
+.scan-big-btn{width:150px; height:120px; border-radius:16px; border:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; font-weight:700; font-size:13px;}
+.scan-big-btn:hover{border-color:var(--accent);}
+#qr-reader{max-width:340px; margin:0 auto;}
+.result-flash{position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:16px;}
+.result-flash.ok{background:rgba(4,20,12,.94);}
+.result-flash.bad{background:rgba(40,8,14,.95);}
+.result-icon{width:120px; height:120px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:60px;}
+.result-icon.ok{background:var(--green); color:#04140C;}
+.result-icon.bad{background:var(--red); color:#fff;}
+.result-flash h2{font-size:22px;}
+.customer-panel{display:flex; align-items:center; gap:14px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-sm); padding:16px; margin-bottom:16px;}
+.customer-panel img{width:56px; height:56px; border-radius:12px; object-fit:cover; background:var(--raise);}
+.qty-stepper{display:flex; align-items:center; gap:8px;}
+.qty-stepper button{width:30px; height:30px; border-radius:8px; border:1px solid var(--line); background:var(--panel2); color:var(--text); font-weight:700;}
+.pick-row{display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border:1px solid var(--line); border-radius:10px; margin-bottom:8px;}
+.toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--raise); border:1px solid var(--line); padding:11px 18px; border-radius:12px; font-size:13.5px; z-index:300; box-shadow:0 10px 25px rgba(0,0,0,.4);}
+.file-drop{border:1.5px dashed var(--line); border-radius:12px; padding:16px; text-align:center; font-size:12.5px; color:var(--muted); cursor:pointer;}
+.file-drop:hover{border-color:var(--accent);}
+.small-note{font-size:11.5px; color:var(--dim); margin-top:6px;}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="brand">
+      <div class="brand-mark">W</div>
+      <div class="brand-name">WAVE Wallet</div>
+    </div>
+    <div class="role-tabs">
+      <div class="role-tab active" data-role="usuario" onclick="setRoleTab('usuario')">Usuario</div>
+      <div class="role-tab" data-role="cobrador" onclick="setRoleTab('cobrador')">Cobrador</div>
+      <div class="role-tab" data-role="admin" onclick="setRoleTab('admin')">Admin</div>
+    </div>
+
+    <!-- USUARIO LOGIN -->
+    <div class="login-panel" id="panel-usuario">
+      <h2>Ingresa a tu billetera</h2>
+      <div class="login-sub">Cédula, correo o código de 4 dígitos</div>
+      <div class="field"><input id="user-identificador" placeholder="Ej: 1020304050 · tú@correo.com · 4821"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="loginUsuario()">Ingresar</button>
+      <div style="text-align:center; margin-top:14px;">
+        <button class="link-btn" onclick="openForgotModal()">Olvidé mi código de acceso</button>
+      </div>
+      <div class="err-msg" id="user-login-err"></div>
+    </div>
+
+    <!-- COBRADOR LOGIN -->
+    <div class="login-panel hidden" id="panel-cobrador">
+      <h2>Acceso cobrador</h2>
+      <div class="login-sub">Selecciona tu nombre e ingresa tu PIN</div>
+      <div class="field"><label>Cobrador</label><select id="cobrador-select"></select></div>
+      <div class="field"><label>PIN</label><input id="cobrador-pin" type="password" maxlength="6" placeholder="••••"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="loginCobrador()">Ingresar</button>
+      <div class="err-msg" id="cobrador-login-err"></div>
+    </div>
+
+    <!-- ADMIN LOGIN -->
+    <div class="login-panel hidden" id="panel-admin">
+      <h2>Panel administrador</h2>
+      <div class="login-sub">Contraseña almacenada en la base de datos</div>
+      <div class="field"><input id="admin-pass" type="password" placeholder="Contraseña"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="loginAdmin()">Ingresar</button>
+      <div class="err-msg" id="admin-login-err"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ USUARIO APP ============ -->
+<div class="app-shell hidden" id="user-app">
+  <div class="topbar">
+    <div class="topbar-left"><div class="brand-mark" style="width:30px;height:30px;font-size:14px;">W</div><b>Mi Billetera</b></div>
+    <button class="logout-btn" onclick="logout()">Salir</button>
+  </div>
+  <div class="tabbar">
+    <button class="tab-btn active" data-t="perfil" onclick="setUserTab('perfil')">Perfil</button>
+    <button class="tab-btn" data-t="productos" onclick="setUserTab('productos')">Productos</button>
+    <button class="tab-btn" data-t="recargar" onclick="setUserTab('recargar')">Recargar saldo</button>
+    <button class="tab-btn" data-t="chat" onclick="setUserTab('chat')">Chat con admin</button>
+  </div>
+  <div class="view">
+    <div class="view-panel active" id="uv-perfil">
+      <div class="wallet-scene">
+        <div class="wallet-card" id="wallet-card" onclick="flipWallet()">
+          <div class="wallet-face wallet-front">
+            <div class="wallet-top">
+              <div class="wallet-chip"></div>
+              <svg class="wallet-nfc-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8CA0B3" stroke-width="2"><path d="M6 8a8 8 0 0 1 0 8M9.5 5a12 12 0 0 1 0 14M13 2a16 16 0 0 1 0 20"/></svg>
+            </div>
+            <div class="wallet-mid">
+              <img class="wallet-photo" id="w-photo" src="" alt="">
+              <div>
+                <div class="wallet-name" id="w-nombre">—</div>
+                <div class="wallet-bracelet" id="w-pulsera">PULSERA · ----</div>
+              </div>
+            </div>
+            <div class="wallet-balance">
+              <div class="lbl">Saldo disponible</div>
+              <div class="val mono" id="w-saldo">$0</div>
+            </div>
+          </div>
+          <div class="wallet-face wallet-back">
+            <div class="wallet-back-hd">Consumos recientes</div>
+            <div class="consumo-list" id="w-consumos"></div>
+          </div>
+        </div>
+      </div>
+      <div class="flip-hint">Toca la tarjeta para ver tus consumos ↺</div>
+      <div class="card" style="max-width:400px; margin:0 auto; text-align:center;">
+        <div style="font-size:12.5px; color:var(--muted); font-weight:700; margin-bottom:10px;">TU CÓDIGO QR PARA COBROS</div>
+        <div class="qr-box"><canvas id="user-qr-canvas"></canvas></div>
+      </div>
+    </div>
+
+    <div class="view-panel" id="uv-productos">
+      <div class="section-hd"><h3>Productos disponibles</h3></div>
+      <div class="grid-3" id="prod-grid"></div>
+    </div>
+
+    <div class="view-panel" id="uv-recargar">
+      <div class="section-hd"><h3>Recargar saldo</h3></div>
+      <button class="btn btn-primary" onclick="openRecargaModal()">+ Nueva recarga</button>
+      <div class="section-hd"><h3>Historial de solicitudes</h3></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Estado</th></tr></thead>
+        <tbody id="user-recargas-body"></tbody>
+      </table></div>
+    </div>
+
+    <div class="view-panel" id="uv-chat">
+      <div class="section-hd"><h3>Chat privado con el administrador</h3></div>
+      <div class="chat-wrap">
+        <div class="chat-msgs" id="user-chat-msgs"></div>
+        <div class="chat-input">
+          <input id="user-chat-text" placeholder="Escribe un mensaje...">
+          <label class="btn btn-ghost btn-sm" style="display:flex;align-items:center;">📎<input type="file" id="user-chat-file" accept="image/*" class="hidden"></label>
+          <button class="btn btn-primary btn-sm" onclick="sendUserChat()">Enviar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ADMIN APP ============ -->
+<div class="app-shell hidden" id="admin-app">
+  <div class="topbar">
+    <div class="topbar-left"><div class="brand-mark" style="width:30px;height:30px;font-size:14px;">W</div><b>Panel Admin</b></div>
+    <button class="logout-btn" onclick="logout()">Salir</button>
+  </div>
+  <div class="tabbar">
+    <button class="tab-btn active" data-t="resumen" onclick="setAdminTab('resumen')">Resumen</button>
+    <button class="tab-btn" data-t="recargas" onclick="setAdminTab('recargas')">Recargas</button>
+    <button class="tab-btn" data-t="usuarios" onclick="setAdminTab('usuarios')">Usuarios</button>
+    <button class="tab-btn" data-t="inventario" onclick="setAdminTab('inventario')">Inventario</button>
+    <button class="tab-btn" data-t="cobradores" onclick="setAdminTab('cobradores')">Cobradores</button>
+    <button class="tab-btn" data-t="chat" onclick="setAdminTab('chat')">Chat</button>
+    <button class="tab-btn" data-t="config" onclick="setAdminTab('config')">Configuración</button>
+  </div>
+  <div class="view">
+    <!-- RESUMEN -->
+    <div class="view-panel active" id="av-resumen">
+      <div class="grid-3">
+        <div class="stat-card"><div class="stat-lbl">Recargas efectivo</div><div class="stat-val mono" id="st-efectivo">$0</div></div>
+        <div class="stat-card"><div class="stat-lbl">Recargas transferencia</div><div class="stat-val mono" id="st-transferencia">$0</div></div>
+        <div class="stat-card"><div class="stat-lbl">Recargas en línea</div><div class="stat-val mono" id="st-online">$0</div></div>
+      </div>
+      <div class="section-hd"><h3>Detalle agrupado por tipo de pago</h3></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Monto</th><th>Estado</th><th>Cobrador</th></tr></thead>
+        <tbody id="resumen-body"></tbody>
+      </table></div>
+    </div>
+
+    <!-- RECARGAS -->
+    <div class="view-panel" id="av-recargas">
+      <div class="search-row">
+        <input id="rec-filtro" placeholder="Filtrar por cliente, cédula, correo o pulsera...">
+        <select id="rec-filtro-estado"><option value="">Todos los estados</option><option value="pendiente">Pendiente</option><option value="aprobada">Aprobada</option><option value="rechazada">Rechazada</option></select>
+        <button class="nfc-btn" onclick="scanNfcInto('rec-filtro')">📶 NFC</button>
+        <button class="btn btn-ghost" onclick="loadRecargasAdmin()">Filtrar</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Monto</th><th>Comprobante</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="recargas-admin-body"></tbody>
+      </table></div>
+    </div>
+
+    <!-- USUARIOS -->
+    <div class="view-panel" id="av-usuarios">
+      <div class="search-row">
+        <input id="usr-filtro" placeholder="Buscar por nombre, cédula, correo o pulsera...">
+        <button class="nfc-btn" onclick="scanNfcInto('usr-filtro')">📶 NFC</button>
+        <button class="btn btn-ghost" onclick="loadUsuariosAdmin()">Buscar</button>
+        <button class="btn btn-primary" onclick="openUsuarioModal()">+ Nuevo usuario</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nombre</th><th>Cédula</th><th>Correo</th><th>Código</th><th>Pulsera</th><th>Saldo</th><th></th></tr></thead>
+        <tbody id="usuarios-admin-body"></tbody>
+      </table></div>
+    </div>
+
+    <!-- INVENTARIO -->
+    <div class="view-panel" id="av-inventario">
+      <div class="section-hd">
+        <h3>Inventario de productos</h3>
+        <div style="display:flex; gap:8px;">
+          <label class="btn btn-ghost btn-sm">Cargar Excel<input type="file" id="excel-input" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleExcelUpload(event)"></label>
+          <button class="btn btn-primary btn-sm" onclick="openProductoModal()">+ Producto</button>
+        </div>
+      </div>
+      <div class="small-note">Columnas esperadas en Excel: producto, cantidad, valor_unitario, impuestos, descripcion</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Producto</th><th>Cant.</th><th>Valor</th><th>Impuesto %</th><th>Descripción</th><th>Disponible</th><th></th></tr></thead>
+        <tbody id="productos-admin-body"></tbody>
+      </table></div>
+    </div>
+
+    <!-- COBRADORES -->
+    <div class="view-panel" id="av-cobradores">
+      <div class="section-hd">
+        <h3>Cobradores</h3>
+        <button class="btn btn-primary btn-sm" onclick="openCobradorModal()">+ Nuevo cobrador</button>
+      </div>
+      <div class="small-note">La contraseña de acceso es un PIN de 4 dígitos generado automáticamente. El cobrador la usa junto a su nombre para entrar en la interfaz de cobro.</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nombre</th><th>Sede</th><th>Contraseña (PIN)</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="cobradores-admin-body"></tbody>
+      </table></div>
+    </div>
+
+    <!-- CHAT ADMIN -->
+    <div class="view-panel" id="av-chat">
+      <div class="grid-2" style="align-items:start;">
+        <div class="card">
+          <div style="font-weight:700; margin-bottom:10px;">Conversaciones</div>
+          <div id="admin-chat-list"></div>
+        </div>
+        <div>
+          <div class="chat-wrap">
+            <div class="chat-msgs" id="admin-chat-msgs"><div class="small-note" style="padding:14px;">Selecciona una conversación</div></div>
+            <div class="chat-input">
+              <input id="admin-chat-text" placeholder="Responder...">
+              <button class="btn btn-primary btn-sm" onclick="sendAdminChat()">Enviar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONFIG -->
+    <div class="view-panel" id="av-config">
+      <div class="grid-2">
+        <div class="card">
+          <h3 style="margin-bottom:12px;">QR para transferencias</h3>
+          <img id="cfg-qr-transfer-preview" style="max-width:160px; border-radius:10px; margin-bottom:10px; display:block;">
+          <label class="file-drop">Subir imagen QR<input type="file" id="cfg-qr-transfer-input" accept="image/*" class="hidden" onchange="uploadConfigImage(this,'qr_transferencia_url','cfg-qr-transfer-preview')"></label>
+        </div>
+        <div class="card">
+          <h3 style="margin-bottom:12px;">Pago en línea</h3>
+          <div class="field"><label>Link de pago</label><input id="cfg-link-online" placeholder="https://..."></div>
+          <img id="cfg-qr-online-preview" style="max-width:160px; border-radius:10px; margin-bottom:10px; display:block;">
+          <label class="file-drop">Subir QR de pago en línea<input type="file" id="cfg-qr-online-input" accept="image/*" class="hidden" onchange="uploadConfigImage(this,'qr_pago_online_url','cfg-qr-online-preview')"></label>
+          <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="saveConfigLink()">Guardar link</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <h3 style="margin-bottom:12px;">Movimientos de saldo (auditoría)</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Monto</th><th>Saldo ant.</th><th>Saldo nuevo</th><th>Por</th></tr></thead>
+          <tbody id="movimientos-body"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ COBRADOR APP ============ -->
+<div class="app-shell hidden" id="cobrador-app">
+  <div class="topbar">
+    <div class="topbar-left"><div class="brand-mark" style="width:30px;height:30px;font-size:14px;">W</div><b id="cobrador-nombre-tag">Cobrador</b></div>
+    <button class="logout-btn" onclick="logout()">Salir</button>
+  </div>
+  <div class="view">
+    <div id="cob-scan-stage" class="scan-scene">
+      <h2 style="margin-bottom:16px;">Escanear cliente</h2>
+      <div class="scan-choice">
+        <button class="scan-big-btn" onclick="startQrScan()">🔳<span>Leer código QR</span></button>
+        <button class="scan-big-btn" onclick="startNfcScan()">📶<span>Leer pulsera NFC</span></button>
+      </div>
+      <div id="qr-reader"></div>
+      <div class="card" style="max-width:340px; margin:16px auto 0;">
+        <label>O ingresa manualmente (ID / cédula / pulsera)</label>
+        <div style="display:flex; gap:8px; margin-top:6px;">
+          <input id="manual-scan-input" placeholder="ID de usuario o pulsera">
+          <button class="btn btn-primary btn-sm" onclick="manualScanLookup()">Buscar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="cob-charge-stage" class="hidden">
+      <button class="btn btn-ghost btn-sm" style="margin-bottom:14px;" onclick="resetCobradorScan()">← Volver a escanear</button>
+      <div class="customer-panel">
+        <img id="cc-photo" src="">
+        <div style="flex:1;">
+          <div style="font-weight:700; font-size:15px;" id="cc-nombre">—</div>
+          <div class="mono" style="font-size:12px; color:var(--muted);" id="cc-pulsera">—</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="stat-lbl">Saldo</div>
+          <div class="stat-val mono" id="cc-saldo" style="color:var(--green);">$0</div>
+        </div>
+      </div>
+      <div class="section-hd"><h3>Selecciona producto</h3></div>
+      <div id="cob-prod-list"></div>
+      <div class="card" style="margin-top:16px; display:flex; justify-content:space-between; align-items:center;">
+        <div><div class="stat-lbl">Total a cobrar</div><div class="stat-val mono" id="cc-total">$0</div></div>
+        <button class="btn btn-green" style="padding:14px 26px; font-size:15px;" onclick="confirmarCobro()">Confirmar cobro</button>
+      </div>
+    </div>
+
+    <div class="section-hd"><h3>Cobros de hoy</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Hora</th><th>Cliente</th><th>Pulsera</th><th>Producto</th><th>Valor</th></tr></thead>
+      <tbody id="cobros-hoy-body"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ============ MODALES ============ -->
+<div id="modal-root"></div>
+<audio id="beep-ok" src="data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=" preload="auto"></audio>
+
+<script>
+/* ============================================================
+   CONFIG SUPABASE
+   ============================================================ */
+const SUPABASE_URL = 'https://cejufafynrsxodgjhhjx.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlanVmYWZ5bnJzeG9kZ2poaGp4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1MjkwMDMsImV4cCI6MjEwMzEwNTAwM30.fOW1v9M98NR-hiMkp9-eWjzDiUbzAop3Rr7UhgI0vYs';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const BUCKET = 'wallet-files';
+
+let state = { role:null, usuario:null, cobrador:null, adminOk:false, chatUsuarioId:null, cobradorCurrentCliente:null, cobradorCart:{}, qrScanner:null };
+
+function money(n){ return '$' + Number(n||0).toLocaleString('es-CO', {maximumFractionDigits:0}); }
+function fmtDate(d){ return new Date(d).toLocaleString('es-CO', {dateStyle:'short', timeStyle:'short'}); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function toast(msg){ const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),3200); }
+function gen4Digits(){ return String(Math.floor(1000+Math.random()*9000)); }
+function esc(s){ return (s??'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function uploadFile(file, path){
+  const { error } = await sb.storage.from(BUCKET).upload(path, file, { upsert:true });
+  if(error){ toast('Error subiendo archivo: '+error.message); return null; }
+  const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+/* ============================================================
+   LOGIN / ROLE TABS
+   ============================================================ */
+function setRoleTab(role){
+  document.querySelectorAll('.role-tab').forEach(t=>t.classList.toggle('active', t.dataset.role===role));
+  ['usuario','cobrador','admin'].forEach(r=>document.getElementById('panel-'+r).classList.toggle('hidden', r!==role));
+  if(role==='cobrador') loadCobradoresSelect();
+}
+
+async function loadCobradoresSelect(){
+  const sel = document.getElementById('cobrador-select');
+  sel.innerHTML = '<option>Cargando...</option>';
+  const { data, error } = await sb.from('cobradores').select('*').eq('activo', true);
+  if(error){ sel.innerHTML = '<option>Error cargando</option>'; return; }
+  sel.innerHTML = data.map(c=>`<option value="${c.id}">${esc(c.nombre)}${c.sede?' · '+esc(c.sede):''}</option>`).join('') || '<option value="">Sin cobradores</option>';
+}
+
+async function loginUsuario(){
+  const val = document.getElementById('user-identificador').value.trim();
+  const errEl = document.getElementById('user-login-err');
+  errEl.textContent='';
+  if(!val){ errEl.textContent='Ingresa un dato de acceso'; return; }
+  const { data, error } = await sb.from('usuarios').select('*')
+    .or(`cedula.eq.${val},correo.eq.${val},codigo_acceso.eq.${val}`)
+    .eq('activo', true).limit(1);
+  if(error || !data || !data.length){ errEl.textContent='No encontramos una cuenta con ese dato'; return; }
+  state.usuario = data[0]; state.role='usuario';
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('user-app').classList.remove('hidden');
+  renderUserProfile();
+  setUserTab('perfil');
+}
+
+function openForgotModal(){
+  showModal(`
+    <h3>Recuperar código de acceso</h3>
+    <div class="field"><label>Número de cédula</label><input id="forgot-cedula" placeholder="Tu cédula"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="doForgot()">Validar</button>
+    <div class="err-msg" id="forgot-err"></div>
+  `);
+}
+async function doForgot(){
+  const ced = document.getElementById('forgot-cedula').value.trim();
+  const errEl = document.getElementById('forgot-err');
+  if(!ced){ errEl.textContent='Ingresa tu cédula'; return; }
+  const { data, error } = await sb.from('usuarios').select('codigo_acceso,nombre').eq('cedula', ced).limit(1);
+  if(error || !data || !data.length){ errEl.textContent='Cédula no encontrada'; return; }
+  closeModal();
+  showModal(`
+    <h3>Código temporal</h3>
+    <p style="color:var(--muted); font-size:13px; margin-bottom:14px;">Hola ${esc(data[0].nombre)}, este código se ocultará automáticamente en 15 segundos.</p>
+    <div style="text-align:center; font-family:var(--mono); font-size:40px; font-weight:700; color:var(--green); letter-spacing:.1em;" id="temp-code">${esc(data[0].codigo_acceso)}</div>
+  `);
+  setTimeout(()=>{ const el=document.getElementById('temp-code'); if(el){ el.textContent='• • • •'; } }, 15000);
+}
+
+async function loginCobrador(){
+  const id = document.getElementById('cobrador-select').value;
+  const pin = document.getElementById('cobrador-pin').value.trim();
+  const errEl = document.getElementById('cobrador-login-err');
+  if(!id || !pin){ errEl.textContent='Selecciona tu nombre e ingresa el PIN'; return; }
+  const { data, error } = await sb.from('cobradores').select('*').eq('id', id).eq('pin', pin).limit(1);
+  if(error || !data || !data.length){ errEl.textContent='PIN incorrecto'; return; }
+  state.cobrador = data[0]; state.role='cobrador';
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('cobrador-app').classList.remove('hidden');
+  document.getElementById('cobrador-nombre-tag').textContent = data[0].nombre;
+  loadCobrosHoy();
+}
+
+async function loginAdmin(){
+  const pass = document.getElementById('admin-pass').value;
+  const errEl = document.getElementById('admin-login-err');
+  const { data, error } = await sb.from('admin_config').select('password').eq('id',1).single();
+  if(error){ errEl.textContent='Error de conexión'; return; }
+  if(pass !== data.password){ errEl.textContent='Contraseña incorrecta'; return; }
+  state.role='admin'; state.adminOk=true;
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('admin-app').classList.remove('hidden');
+  initAdminDashboard();
+}
+
+function logout(){
+  state = { role:null, usuario:null, cobrador:null, adminOk:false, chatUsuarioId:null, cobradorCurrentCliente:null, cobradorCart:{}, qrScanner:null };
+  document.querySelectorAll('.app-shell').forEach(s=>s.classList.add('hidden'));
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('user-identificador').value='';
+  document.getElementById('admin-pass').value='';
+}
+
+function showModal(html){
+  document.getElementById('modal-root').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal-box">
+    <button class="modal-close" onclick="closeModal()">×</button>${html}</div></div>`;
+}
+function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
+
+/* ============================================================
+   USUARIO — PERFIL
+   ============================================================ */
+function setUserTab(t){
+  document.querySelectorAll('#user-app .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.t===t));
+  document.querySelectorAll('#user-app .view-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('uv-'+t).classList.add('active');
+  if(t==='productos') loadProductosUsuario();
+  if(t==='recargar') loadRecargasUsuario();
+  if(t==='chat') loadChatUsuario();
+}
+
+function flipWallet(){ document.getElementById('wallet-card').classList.toggle('flipped'); }
+
+async function renderUserProfile(){
+  const u = state.usuario;
+  document.getElementById('w-nombre').textContent = u.nombre;
+  document.getElementById('w-pulsera').textContent = 'PULSERA · ' + (u.pulsera_nfc || 'Sin asignar');
+  document.getElementById('w-saldo').textContent = money(u.saldo);
+  document.getElementById('w-photo').src = u.foto_url || 'https://api.dicebear.com/7.x/initials/svg?seed=' + encodeURIComponent(u.nombre);
+  QRCode.toCanvas(document.getElementById('user-qr-canvas'), u.id, { width:150, margin:1, color:{dark:'#0A0E13'} });
+
+  const { data: consumos } = await sb.from('consumos').select('*').eq('usuario_id', u.id).order('fecha', {ascending:false}).limit(40);
+  const cont = document.getElementById('w-consumos');
+  if(!consumos || !consumos.length){ cont.innerHTML = '<div class="small-note">Aún no tienes consumos</div>'; }
+  else {
+    cont.innerHTML = consumos.map(c=>`<div class="consumo-row"><div><b>${esc(c.producto_nombre)}</b><br><span style="color:var(--muted)">x${c.cantidad} · ${esc(c.pulsera_nfc||'')}</span></div><div class="mono">${money(c.valor_total)}</div></div>`).join('');
+  }
+}
+
+async function refreshUsuarioSaldo(){
+  const { data } = await sb.from('usuarios').select('*').eq('id', state.usuario.id).single();
+  if(data){ state.usuario = data; renderUserProfile(); }
+}
+
+async function loadProductosUsuario(){
+  const { data } = await sb.from('productos').select('*').eq('disponible', true).gt('cantidad', 0).order('nombre');
+  const grid = document.getElementById('prod-grid');
+  grid.innerHTML = (data||[]).map(p=>`
+    <div class="prod-card">
+      <div class="prod-name">${esc(p.nombre)}</div>
+      <div class="prod-price">${money(p.valor_unitario)}</div>
+      <div class="prod-stock">Disponibles: ${p.cantidad}</div>
+      ${p.descripcion ? `<div class="small-note">${esc(p.descripcion)}</div>` : ''}
+    </div>`).join('') || '<div class="small-note">No hay productos disponibles por ahora</div>';
+}
+
+/* ---- RECARGAS (usuario) ---- */
+let recargaTipo = null, recargaSub = null, recargaComprobanteFile = null;
+async function openRecargaModal(){
+  recargaTipo=null; recargaSub=null; recargaComprobanteFile=null;
+  showModal(`
+    <h3>Nueva recarga</h3>
+    <div class="choice-row">
+      <button class="choice-btn" id="ch-caja" onclick="setRecargaTipo('caja')">En caja</button>
+      <button class="choice-btn" id="ch-online" onclick="setRecargaTipo('online')">En línea</button>
+    </div>
+    <div id="recarga-body"></div>
+  `);
+}
+function setRecargaTipo(t){
+  recargaTipo=t;
+  document.getElementById('ch-caja').classList.toggle('active', t==='caja');
+  document.getElementById('ch-online').classList.toggle('active', t==='online');
+  const body = document.getElementById('recarga-body');
+  if(t==='caja'){
+    body.innerHTML = `
+      <div class="field"><label>Monto a recargar</label><input id="rec-monto" type="number" placeholder="0"></div>
+      <div class="choice-row">
+        <button class="choice-btn" id="sub-efectivo" onclick="setRecargaSub('efectivo')">Efectivo</button>
+        <button class="choice-btn" id="sub-transferencia" onclick="setRecargaSub('transferencia')">Transferencia</button>
+      </div>
+      <div id="recarga-sub-body"></div>
+      <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="submitRecargaCaja()">Enviar solicitud</button>`;
+  } else {
+    body.innerHTML = `
+      <div class="field"><label>Monto a pagar</label><input id="rec-monto-online" type="number" placeholder="0"></div>
+      <div id="online-pay-info" class="small-note">Cargando datos de pago...</div>
+      <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="goOnlinePaid()">Ya pagué, enviar comprobante</button>`;
+    loadOnlinePayInfo();
+  }
+}
+function setRecargaSub(s){
+  recargaSub=s;
+  document.getElementById('sub-efectivo').classList.toggle('active', s==='efectivo');
+  document.getElementById('sub-transferencia').classList.toggle('active', s==='transferencia');
+  const body = document.getElementById('recarga-sub-body');
+  if(s==='transferencia'){
+    body.innerHTML = `<div class="field"><label>Foto del comprobante</label>
+      <label class="file-drop">Toca para adjuntar imagen<input type="file" id="rec-comprobante" accept="image/*" class="hidden" onchange="recargaComprobanteFile=this.files[0]; toast('Comprobante adjuntado')"></label></div>`;
+  } else { body.innerHTML=''; }
+}
+async function loadOnlinePayInfo(){
+  const { data } = await sb.from('admin_config').select('*').eq('id',1).single();
+  const el = document.getElementById('online-pay-info');
+  if(!data || (!data.qr_pago_online_url && !data.link_pago_online)){ el.innerHTML='El administrador aún no configura el pago en línea.'; return; }
+  el.innerHTML = `
+    ${data.qr_pago_online_url ? `<div class="qr-box" style="margin-bottom:10px;"><img src="${data.qr_pago_online_url}" style="width:150px;display:block;"></div>` : ''}
+    ${data.link_pago_online ? `<a href="${data.link_pago_online}" target="_blank" style="color:var(--accent2);">Abrir link de pago →</a>` : ''}`;
+}
+async function submitRecargaCaja(){
+  const monto = Number(document.getElementById('rec-monto').value);
+  if(!monto || monto<=0){ toast('Ingresa un monto válido'); return; }
+  if(!recargaSub){ toast('Selecciona efectivo o transferencia'); return; }
+  let comprobanteUrl = null;
+  if(recargaSub==='transferencia'){
+    if(!recargaComprobanteFile){ toast('Adjunta la foto del comprobante'); return; }
+    comprobanteUrl = await uploadFile(recargaComprobanteFile, `comprobantes/${state.usuario.id}_${Date.now()}.jpg`);
+  }
+  const { error } = await sb.from('recargas').insert({
+    usuario_id: state.usuario.id, tipo_pago: recargaSub, monto, estado:'pendiente', comprobante_url: comprobanteUrl
+  });
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('Solicitud enviada. Un cobrador o el admin la validará.'); loadRecargasUsuario();
+}
+function goOnlinePaid(){
+  const monto = document.getElementById('rec-monto-online').value;
+  closeModal();
+  setUserTab('chat');
+  document.getElementById('user-chat-text').value = `Realicé una recarga en línea por ${money(monto)}. Adjunto el comprobante.`;
+}
+async function loadRecargasUsuario(){
+  const { data } = await sb.from('recargas').select('*').eq('usuario_id', state.usuario.id).order('fecha', {ascending:false});
+  const body = document.getElementById('user-recargas-body');
+  body.innerHTML = (data||[]).map(r=>`<tr><td>${fmtDate(r.fecha)}</td><td>${r.tipo_pago}</td><td class="mono">${money(r.monto)}</td><td><span class="pill pill-${r.estado==='aprobada'?'green':(r.estado==='rechazada'?'red':'amber')}">${r.estado}</span></td></tr>`).join('') || '<tr><td colspan="4" class="small-note">Sin recargas aún</td></tr>';
+}
+
+/* ---- CHAT (usuario) ---- */
+async function loadChatUsuario(){
+  const { data } = await sb.from('chat_recargas').select('*').eq('usuario_id', state.usuario.id).order('fecha');
+  renderChatMsgs('user-chat-msgs', data||[], 'usuario');
+}
+function renderChatMsgs(containerId, msgs, myRole){
+  const cont = document.getElementById(containerId);
+  cont.innerHTML = msgs.map(m=>`<div class="msg ${m.remitente===myRole?'msg-user':'msg-admin'}">${esc(m.mensaje||'')}${m.adjunto_url?`<img src="${m.adjunto_url}">`:''}<div style="font-size:9.5px;opacity:.6;margin-top:3px;">${fmtDate(m.fecha)}</div></div>`).join('') || '<div class="small-note" style="padding:14px;">Sin mensajes aún</div>';
+  cont.scrollTop = cont.scrollHeight;
+}
+async function sendUserChat(){
+  const text = document.getElementById('user-chat-text').value.trim();
+  const file = document.getElementById('user-chat-file').files[0];
+  if(!text && !file){ return; }
+  let adjunto = null;
+  if(file){ adjunto = await uploadFile(file, `chat/${state.usuario.id}_${Date.now()}.jpg`); }
+  await sb.from('chat_recargas').insert({ usuario_id: state.usuario.id, remitente:'usuario', mensaje:text, adjunto_url:adjunto });
+  document.getElementById('user-chat-text').value='';
+  document.getElementById('user-chat-file').value='';
+  loadChatUsuario();
+}
+
+/* ============================================================
+   ADMIN
+   ============================================================ */
+function setAdminTab(t){
+  document.querySelectorAll('#admin-app .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.t===t));
+  document.querySelectorAll('#admin-app .view-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('av-'+t).classList.add('active');
+  if(t==='resumen') loadResumenAdmin();
+  if(t==='recargas') loadRecargasAdmin();
+  if(t==='usuarios') loadUsuariosAdmin();
+  if(t==='inventario') loadProductosAdmin();
+  if(t==='cobradores') loadCobradoresAdmin();
+  if(t==='chat') loadAdminChatList();
+  if(t==='config') loadConfigAdmin();
+}
+function initAdminDashboard(){ loadResumenAdmin(); loadConfigAdmin(); }
+
+async function loadResumenAdmin(){
+  const { data } = await sb.from('recargas').select('*, usuarios(nombre)').order('fecha', {ascending:false}).limit(200);
+  const rows = data||[];
+  const sum = (tipo)=> rows.filter(r=>r.tipo_pago===tipo && r.estado==='aprobada').reduce((a,r)=>a+Number(r.monto),0);
+  document.getElementById('st-efectivo').textContent = money(sum('efectivo'));
+  document.getElementById('st-transferencia').textContent = money(sum('transferencia'));
+  document.getElementById('st-online').textContent = money(sum('online'));
+  document.getElementById('resumen-body').innerHTML = rows.map(r=>`<tr>
+    <td>${fmtDate(r.fecha)}</td><td>${esc(r.usuarios?.nombre||'—')}</td><td>${r.tipo_pago}</td>
+    <td class="mono">${money(r.monto)}</td><td><span class="pill pill-${r.estado==='aprobada'?'green':(r.estado==='rechazada'?'red':'amber')}">${r.estado}</span></td>
+    <td>${esc(r.cobrador_nombre||'—')}</td></tr>`).join('') || '<tr><td colspan="6" class="small-note">Sin registros</td></tr>';
+}
+
+async function loadRecargasAdmin(){
+  const filtro = (document.getElementById('rec-filtro')?.value||'').trim();
+  const estado = document.getElementById('rec-filtro-estado')?.value || '';
+  let query = sb.from('recargas').select('*, usuarios(nombre,cedula,correo,pulsera_nfc)').order('fecha', {ascending:false});
+  if(estado) query = query.eq('estado', estado);
+  const { data } = await query;
+  let rows = data||[];
+  if(filtro){
+    const f = filtro.toLowerCase();
+    rows = rows.filter(r=> (r.usuarios?.nombre||'').toLowerCase().includes(f) || (r.usuarios?.cedula||'').includes(f) || (r.usuarios?.correo||'').toLowerCase().includes(f) || (r.usuarios?.pulsera_nfc||'').toLowerCase().includes(f));
+  }
+  document.getElementById('recargas-admin-body').innerHTML = rows.map(r=>`<tr>
+    <td>${fmtDate(r.fecha)}</td><td>${esc(r.usuarios?.nombre||'—')}</td><td>${r.tipo_pago}</td><td class="mono">${money(r.monto)}</td>
+    <td>${r.comprobante_url?`<a href="${r.comprobante_url}" target="_blank" style="color:var(--accent2)">Ver</a>`:'—'}</td>
+    <td><span class="pill pill-${r.estado==='aprobada'?'green':(r.estado==='rechazada'?'red':'amber')}">${r.estado}</span></td>
+    <td>${r.estado==='pendiente'?`<div style="display:flex;gap:6px;"><button class="btn btn-green btn-sm" onclick="aprobarRecarga('${r.id}')">Aprobar</button><button class="btn btn-red btn-sm" onclick="rechazarRecarga('${r.id}')">Rechazar</button></div>`:'—'}</td>
+  </tr>`).join('') || '<tr><td colspan="7" class="small-note">Sin resultados</td></tr>';
+}
+async function aprobarRecarga(id){
+  const { data: rec } = await sb.from('recargas').select('*').eq('id', id).single();
+  if(!rec) return;
+  const { data: usr } = await sb.from('usuarios').select('*').eq('id', rec.usuario_id).single();
+  const nuevoSaldo = Number(usr.saldo) + Number(rec.monto);
+  await sb.from('usuarios').update({ saldo: nuevoSaldo }).eq('id', usr.id);
+  await sb.from('movimientos_saldo').insert({ usuario_id: usr.id, tipo:'recarga_'+rec.tipo_pago, monto:rec.monto, saldo_anterior:usr.saldo, saldo_nuevo:nuevoSaldo, realizado_por:'admin', detalle:'Recarga aprobada' });
+  await sb.from('recargas').update({ estado:'aprobada', aprobado_por:'admin', fecha_aprobacion:new Date().toISOString() }).eq('id', id);
+  toast('Recarga aprobada'); loadRecargasAdmin(); loadResumenAdmin();
+}
+async function rechazarRecarga(id){
+  await sb.from('recargas').update({ estado:'rechazada', aprobado_por:'admin', fecha_aprobacion:new Date().toISOString() }).eq('id', id);
+  toast('Recarga rechazada'); loadRecargasAdmin();
+}
+
+/* ---- USUARIOS (admin) ---- */
+async function loadUsuariosAdmin(){
+  const filtro = (document.getElementById('usr-filtro')?.value||'').trim();
+  let query = sb.from('usuarios').select('*').order('created_at', {ascending:false});
+  const { data } = await query;
+  let rows = data||[];
+  if(filtro){
+    const f = filtro.toLowerCase();
+    rows = rows.filter(u=> (u.nombre||'').toLowerCase().includes(f) || (u.cedula||'').includes(f) || (u.correo||'').toLowerCase().includes(f) || (u.pulsera_nfc||'').toLowerCase().includes(f));
+  }
+  document.getElementById('usuarios-admin-body').innerHTML = rows.map(u=>`<tr>
+    <td>${esc(u.nombre)}</td><td>${esc(u.cedula)}</td><td>${esc(u.correo||'—')}</td>
+    <td class="mono">${esc(u.codigo_acceso)}</td><td class="mono">${esc(u.pulsera_nfc||'—')}</td>
+    <td class="mono" style="color:var(--green)">${money(u.saldo)}</td>
+    <td><div style="display:flex;gap:6px;"><button class="btn btn-ghost btn-sm" onclick='openUsuarioModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Editar</button>
+    <button class="btn btn-ghost btn-sm" onclick="openSaldoModal('${u.id}')">Saldo</button></div></td>
+  </tr>`).join('') || '<tr><td colspan="7" class="small-note">Sin usuarios</td></tr>';
+}
+function openUsuarioModal(u){
+  const isEdit = !!u;
+  showModal(`
+    <h3>${isEdit?'Editar':'Nuevo'} usuario</h3>
+    <div class="field"><label>Nombre</label><input id="um-nombre" value="${isEdit?esc(u.nombre):''}"></div>
+    <div class="field"><label>Cédula</label><input id="um-cedula" value="${isEdit?esc(u.cedula):''}"></div>
+    <div class="field"><label>Correo</label><input id="um-correo" value="${isEdit?esc(u.correo||''):''}"></div>
+    <div class="field"><label>Código de acceso (4 dígitos)</label><div style="display:flex;gap:8px;"><input id="um-codigo" value="${isEdit?esc(u.codigo_acceso):gen4Digits()}"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('um-codigo').value=gen4Digits()">🎲</button></div></div>
+    <div class="field"><label>Pulsera NFC</label><div style="display:flex;gap:8px;"><input id="um-pulsera" value="${isEdit?esc(u.pulsera_nfc||''):''}" placeholder="Escanea o escribe el ID"><button class="nfc-btn" onclick="scanNfcInto('um-pulsera')">📶</button></div></div>
+    <div class="field"><label>Foto (URL o subir archivo)</label>
+      <input id="um-foto-url" value="${isEdit?esc(u.foto_url||''):''}" placeholder="https://..." style="margin-bottom:6px;">
+      <input type="file" id="um-foto-file" accept="image/*">
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="saveUsuario(${isEdit?`'${u.id}'`:'null'})">Guardar</button>
+  `);
+}
+async function saveUsuario(id){
+  let fotoUrl = document.getElementById('um-foto-url').value.trim();
+  const file = document.getElementById('um-foto-file').files[0];
+  const payload = {
+    nombre: document.getElementById('um-nombre').value.trim(),
+    cedula: document.getElementById('um-cedula').value.trim(),
+    correo: document.getElementById('um-correo').value.trim() || null,
+    codigo_acceso: document.getElementById('um-codigo').value.trim(),
+    pulsera_nfc: document.getElementById('um-pulsera').value.trim() || null,
+  };
+  if(!payload.nombre || !payload.cedula){ toast('Nombre y cédula son obligatorios'); return; }
+  if(file){ fotoUrl = await uploadFile(file, `fotos/${payload.cedula}_${Date.now()}.jpg`) || fotoUrl; }
+  payload.foto_url = fotoUrl || null;
+  let error;
+  if(id){ ({ error } = await sb.from('usuarios').update(payload).eq('id', id)); }
+  else { payload.saldo = 0; ({ error } = await sb.from('usuarios').insert(payload)); }
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('Usuario guardado'); loadUsuariosAdmin();
+}
+function openSaldoModal(userId){
+  showModal(`
+    <h3>Ajustar saldo manualmente</h3>
+    <div class="field"><label>Monto</label><input id="sm-monto" type="number" placeholder="0"></div>
+    <div class="field"><label>Motivo</label><input id="sm-motivo" placeholder="Ej: Ajuste por error de cobro"></div>
+    <div class="choice-row">
+      <button class="btn btn-green" style="flex:1" onclick="ajustarSaldo('${userId}', 1)">+ Agregar</button>
+      <button class="btn btn-red" style="flex:1" onclick="ajustarSaldo('${userId}', -1)">− Quitar</button>
+    </div>
+  `);
+}
+async function ajustarSaldo(userId, sign){
+  const monto = Number(document.getElementById('sm-monto').value);
+  const motivo = document.getElementById('sm-motivo').value.trim();
+  if(!monto || monto<=0){ toast('Ingresa un monto válido'); return; }
+  const { data: u } = await sb.from('usuarios').select('*').eq('id', userId).single();
+  const nuevo = Number(u.saldo) + sign*monto;
+  await sb.from('usuarios').update({ saldo: nuevo }).eq('id', userId);
+  await sb.from('movimientos_saldo').insert({ usuario_id:userId, tipo: sign>0?'ajuste_manual_suma':'ajuste_manual_resta', monto, saldo_anterior:u.saldo, saldo_nuevo:nuevo, realizado_por:'admin', detalle:motivo });
+  closeModal(); toast('Saldo actualizado'); loadUsuariosAdmin(); loadMovimientos();
+}
+async function loadMovimientos(){
+  const { data } = await sb.from('movimientos_saldo').select('*, usuarios(nombre)').order('fecha', {ascending:false}).limit(100);
+  document.getElementById('movimientos-body').innerHTML = (data||[]).map(m=>`<tr>
+    <td>${fmtDate(m.fecha)}</td><td>${esc(m.usuarios?.nombre||'—')}</td><td>${m.tipo}</td>
+    <td class="mono">${money(m.monto)}</td><td class="mono">${money(m.saldo_anterior)}</td><td class="mono">${money(m.saldo_nuevo)}</td><td>${esc(m.realizado_por||'—')}</td>
+  </tr>`).join('') || '<tr><td colspan="7" class="small-note">Sin movimientos</td></tr>';
+}
+
+/* ---- NFC (Web NFC API — Android/Chrome) ---- */
+async function scanNfcInto(inputId){
+  if(!('NDEFReader' in window)){
+    const manual = prompt('Lectura NFC no disponible en este navegador/dispositivo. Ingresa el ID de la pulsera manualmente:');
+    if(manual) document.getElementById(inputId).value = manual.trim();
+    return;
+  }
+  try{
+    const reader = new NDEFReader();
+    await reader.scan();
+    toast('Acerca la pulsera NFC...');
+    reader.onreading = (event)=>{ document.getElementById(inputId).value = event.serialNumber || 'nfc-'+Date.now(); toast('Pulsera detectada'); };
+  }catch(e){ toast('No se pudo iniciar el lector NFC: '+e.message); }
+}
+
+/* ---- INVENTARIO (admin) ---- */
+async function loadProductosAdmin(){
+  const { data } = await sb.from('productos').select('*').order('nombre');
+  document.getElementById('productos-admin-body').innerHTML = (data||[]).map(p=>`<tr>
+    <td>${esc(p.nombre)}</td><td>${p.cantidad}</td><td class="mono">${money(p.valor_unitario)}</td><td>${p.impuesto_pct}%</td>
+    <td>${esc(p.descripcion||'—')}</td>
+    <td><span class="pill pill-${p.disponible?'green':'red'}" style="cursor:pointer" onclick="toggleProducto('${p.id}', ${!p.disponible})">${p.disponible?'Sí':'No'}</span></td>
+    <td><button class="btn btn-ghost btn-sm" onclick='openProductoModal(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Editar</button></td>
+  </tr>`).join('') || '<tr><td colspan="7" class="small-note">Sin productos</td></tr>';
+}
+async function toggleProducto(id, val){ await sb.from('productos').update({ disponible: val }).eq('id', id); loadProductosAdmin(); }
+function openProductoModal(p){
+  const isEdit = !!p;
+  showModal(`
+    <h3>${isEdit?'Editar':'Nuevo'} producto</h3>
+    <div class="field"><label>Producto</label><input id="pm-nombre" value="${isEdit?esc(p.nombre):''}"></div>
+    <div class="field"><label>Cantidad</label><input id="pm-cantidad" type="number" value="${isEdit?p.cantidad:0}"></div>
+    <div class="field"><label>Valor unitario</label><input id="pm-valor" type="number" value="${isEdit?p.valor_unitario:0}"></div>
+    <div class="field"><label>Impuesto %</label><input id="pm-impuesto" type="number" value="${isEdit?p.impuesto_pct:0}"></div>
+    <div class="field"><label>Descripción</label><textarea id="pm-desc" rows="2">${isEdit?esc(p.descripcion||''):''}</textarea></div>
+    <button class="btn btn-primary" style="width:100%" onclick="saveProducto(${isEdit?`'${p.id}'`:'null'})">Guardar</button>
+  `);
+}
+async function saveProducto(id){
+  const payload = {
+    nombre: document.getElementById('pm-nombre').value.trim(),
+    cantidad: Number(document.getElementById('pm-cantidad').value)||0,
+    valor_unitario: Number(document.getElementById('pm-valor').value)||0,
+    impuesto_pct: Number(document.getElementById('pm-impuesto').value)||0,
+    descripcion: document.getElementById('pm-desc').value.trim(),
+  };
+  if(!payload.nombre){ toast('El nombre es obligatorio'); return; }
+  let error;
+  if(id){ ({ error } = await sb.from('productos').update(payload).eq('id', id)); }
+  else { payload.disponible=true; ({ error } = await sb.from('productos').insert(payload)); }
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('Producto guardado'); loadProductosAdmin();
+}
+function handleExcelUpload(evt){
+  const file = evt.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e)=>{
+    const wb = XLSX.read(e.target.result, {type:'binary'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws);
+    const payload = rows.map(r=>({
+      nombre: r.producto || r.Producto || '',
+      cantidad: Number(r.cantidad || r.Cantidad || 0),
+      valor_unitario: Number(r.valor_unitario || r['Valor Unitario'] || r.valor || 0),
+      impuesto_pct: Number(r.impuestos || r.Impuestos || 0),
+      descripcion: r.descripcion || r.Descripcion || '',
+      disponible: true
+    })).filter(p=>p.nombre);
+    if(!payload.length){ toast('No se encontraron filas válidas'); return; }
+    const { error } = await sb.from('productos').insert(payload);
+    if(error){ toast('Error: '+error.message); return; }
+    toast(`${payload.length} productos cargados`); loadProductosAdmin();
+  };
+  reader.readAsBinaryString(file);
+}
+
+/* ---- CHAT (admin) ---- */
+async function loadAdminChatList(){
+  const { data } = await sb.from('chat_recargas').select('usuario_id, usuarios(nombre), mensaje, fecha').order('fecha', {ascending:false});
+  const seen = new Set(); const list=[];
+  (data||[]).forEach(m=>{ if(!seen.has(m.usuario_id)){ seen.add(m.usuario_id); list.push(m); } });
+  document.getElementById('admin-chat-list').innerHTML = list.map(m=>`<div class="pick-row" style="cursor:pointer" onclick="openAdminChat('${m.usuario_id}')"><div><b>${esc(m.usuarios?.nombre||'Usuario')}</b><br><span class="small-note">${esc((m.mensaje||'').slice(0,40))}</span></div></div>`).join('') || '<div class="small-note">Sin conversaciones</div>';
+}
+async function openAdminChat(usuarioId){
+  state.chatUsuarioId = usuarioId;
+  const { data } = await sb.from('chat_recargas').select('*').eq('usuario_id', usuarioId).order('fecha');
+  renderChatMsgs('admin-chat-msgs', data||[], 'admin');
+}
+async function sendAdminChat(){
+  if(!state.chatUsuarioId){ toast('Selecciona una conversación'); return; }
+  const text = document.getElementById('admin-chat-text').value.trim();
+  if(!text) return;
+  await sb.from('chat_recargas').insert({ usuario_id: state.chatUsuarioId, remitente:'admin', mensaje:text });
+  document.getElementById('admin-chat-text').value='';
+  openAdminChat(state.chatUsuarioId);
+}
+
+/* ---- CONFIG (admin) ---- */
+async function loadConfigAdmin(){
+  const { data } = await sb.from('admin_config').select('*').eq('id',1).single();
+  if(!data) return;
+  if(data.qr_transferencia_url) document.getElementById('cfg-qr-transfer-preview').src = data.qr_transferencia_url;
+  if(data.qr_pago_online_url) document.getElementById('cfg-qr-online-preview').src = data.qr_pago_online_url;
+  document.getElementById('cfg-link-online').value = data.link_pago_online || '';
+  loadMovimientos();
+}
+async function uploadConfigImage(input, field, previewId){
+  const file = input.files[0]; if(!file) return;
+  const url = await uploadFile(file, `config/${field}_${Date.now()}.jpg`);
+  if(!url) return;
+  await sb.from('admin_config').update({ [field]: url }).eq('id',1);
+  document.getElementById(previewId).src = url;
+  toast('Imagen actualizada');
+}
+async function saveConfigLink(){
+  const link = document.getElementById('cfg-link-online').value.trim();
+  await sb.from('admin_config').update({ link_pago_online: link }).eq('id',1);
+  toast('Link guardado');
+}
+async function loadCobradoresAdmin(){
+  const { data } = await sb.from('cobradores').select('*').order('nombre');
+  document.getElementById('cobradores-admin-body').innerHTML = (data||[]).map(c=>`<tr>
+    <td>${esc(c.nombre)}</td><td>${esc(c.sede||'—')}</td><td class="mono" style="font-weight:700; letter-spacing:.06em;">${esc(c.pin)}</td>
+    <td><span class="pill pill-${c.activo?'green':'red'}">${c.activo?'Activo':'Inactivo'}</span></td>
+    <td><div style="display:flex; gap:6px;">
+      <button class="btn btn-ghost btn-sm" onclick='openCobradorModal(${JSON.stringify(c).replace(/'/g,"&#39;")})'>Editar</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleCobrador('${c.id}', ${!c.activo})">${c.activo?'Desactivar':'Activar'}</button>
+    </div></td>
+  </tr>`).join('') || '<tr><td colspan="5" class="small-note">Sin cobradores creados</td></tr>';
+}
+function openCobradorModal(c){
+  const isEdit = !!c;
+  showModal(`
+    <h3>${isEdit?'Editar':'Nuevo'} cobrador</h3>
+    <div class="field"><label>Nombre</label><input id="cm-nombre" value="${isEdit?esc(c.nombre):''}" placeholder="Nombre completo"></div>
+    <div class="field"><label>Sede</label><input id="cm-sede" value="${isEdit?esc(c.sede||''):''}" placeholder="Ej: Sede Central, Punto Norte..."></div>
+    <div class="field">
+      <label>Contraseña de acceso (PIN 4 dígitos)</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input id="cm-pin" class="mono" value="${isEdit?esc(c.pin):gen4Digits()}" readonly style="font-weight:700; letter-spacing:.1em; font-size:16px;">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cm-pin').value=gen4Digits()">🎲 Generar</button>
+      </div>
+      <div class="small-note">Se genera aleatoriamente; entrégasela al cobrador para que ingrese en la interfaz de cobro.</div>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="saveCobrador(${isEdit?`'${c.id}'`:'null'})">Guardar</button>
+  `);
+}
+async function saveCobrador(id){
+  const nombre = document.getElementById('cm-nombre').value.trim();
+  const sede = document.getElementById('cm-sede').value.trim();
+  const pin = document.getElementById('cm-pin').value.trim();
+  if(!nombre || !sede){ toast('Nombre y sede son obligatorios'); return; }
+  const payload = { nombre, sede, pin };
+  let error;
+  if(id){ ({ error } = await sb.from('cobradores').update(payload).eq('id', id)); }
+  else { payload.activo = true; ({ error } = await sb.from('cobradores').insert(payload)); }
+  if(error){ toast('Error: '+error.message); return; }
+  closeModal(); toast('Cobrador guardado'); loadCobradoresAdmin();
+}
+async function toggleCobrador(id, val){ await sb.from('cobradores').update({ activo:val }).eq('id', id); loadCobradoresAdmin(); }
+
+/* ============================================================
+   COBRADOR
+   ============================================================ */
+async function loadCobrosHoy(){
+  const { data } = await sb.from('consumos').select('*').gte('fecha', todayStr()+'T00:00:00').order('fecha', {ascending:false});
+  document.getElementById('cobros-hoy-body').innerHTML = (data||[]).map(c=>`<tr>
+    <td>${new Date(c.fecha).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'})}</td>
+    <td>${esc(c.usuario_id ? '' : '')}${esc(c.cobrador_nombre?'':'')}${esc(c.producto_nombre)}</td>
+    <td class="mono">${esc(c.pulsera_nfc||'—')}</td><td>${esc(c.producto_nombre)}</td><td class="mono">${money(c.valor_total)}</td>
+  </tr>`).join('') || '<tr><td colspan="5" class="small-note">Sin cobros aún hoy</td></tr>';
+  // fix client name column properly
+  fixCobrosHoyNames(data||[]);
+}
+async function fixCobrosHoyNames(rows){
+  const ids = [...new Set(rows.map(r=>r.usuario_id).filter(Boolean))];
+  if(!ids.length) return;
+  const { data: users } = await sb.from('usuarios').select('id,nombre').in('id', ids);
+  const map = {}; (users||[]).forEach(u=>map[u.id]=u.nombre);
+  document.getElementById('cobros-hoy-body').innerHTML = rows.map(c=>`<tr>
+    <td>${new Date(c.fecha).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'})}</td>
+    <td>${esc(map[c.usuario_id]||'—')}</td><td class="mono">${esc(c.pulsera_nfc||'—')}</td><td>${esc(c.producto_nombre)}</td><td class="mono">${money(c.valor_total)}</td>
+  </tr>`).join('') || '<tr><td colspan="5" class="small-note">Sin cobros aún hoy</td></tr>';
+}
+
+function startQrScan(){
+  document.getElementById('qr-reader').innerHTML='';
+  state.qrScanner = new Html5Qrcode('qr-reader');
+  state.qrScanner.start({ facingMode:'environment' }, { fps:10, qrbox:220 },
+    async (decodedText)=>{ await state.qrScanner.stop(); document.getElementById('qr-reader').innerHTML=''; lookupCliente(decodedText); },
+    ()=>{}
+  ).catch(err=> toast('No se pudo abrir la cámara: '+err));
+}
+async function startNfcScan(){
+  if(!('NDEFReader' in window)){ toast('NFC no disponible en este navegador. Usa el campo manual.'); return; }
+  try{
+    const reader = new NDEFReader();
+    await reader.scan();
+    toast('Acerca la pulsera...');
+    reader.onreading = (event)=>{ lookupCliente(event.serialNumber || ''); };
+  }catch(e){ toast('Error NFC: '+e.message); }
+}
+function manualScanLookup(){
+  const val = document.getElementById('manual-scan-input').value.trim();
+  if(val) lookupCliente(val);
+}
+async function lookupCliente(text){
+  const { data } = await sb.from('usuarios').select('*').or(`id.eq.${text},pulsera_nfc.eq.${text},cedula.eq.${text}`).limit(1);
+  if(!data || !data.length){ toast('Cliente no encontrado'); return; }
+  state.cobradorCurrentCliente = data[0]; state.cobradorCart = {};
+  document.getElementById('cob-scan-stage').classList.add('hidden');
+  document.getElementById('cob-charge-stage').classList.remove('hidden');
+  document.getElementById('cc-photo').src = data[0].foto_url || 'https://api.dicebear.com/7.x/initials/svg?seed='+encodeURIComponent(data[0].nombre);
+  document.getElementById('cc-nombre').textContent = data[0].nombre;
+  document.getElementById('cc-pulsera').textContent = data[0].pulsera_nfc || 'Sin pulsera';
+  document.getElementById('cc-saldo').textContent = money(data[0].saldo);
+  loadProductosCobrador();
+}
+function resetCobradorScan(){
+  document.getElementById('cob-charge-stage').classList.add('hidden');
+  document.getElementById('cob-scan-stage').classList.remove('hidden');
+  state.cobradorCurrentCliente = null; state.cobradorCart = {};
+}
+async function loadProductosCobrador(){
+  const { data } = await sb.from('productos').select('*').eq('disponible', true).gt('cantidad', 0).order('nombre');
+  document.getElementById('cob-prod-list').innerHTML = (data||[]).map(p=>`
+    <div class="pick-row">
+      <div><b>${esc(p.nombre)}</b><br><span class="small-note">${money(p.valor_unitario)} · Stock ${p.cantidad}</span></div>
+      <div class="qty-stepper">
+        <button onclick="changeQty('${p.id}', -1)">−</button>
+        <span id="qty-${p.id}">0</span>
+        <button onclick="changeQty('${p.id}', 1, ${p.cantidad}, ${p.valor_unitario}, '${esc(p.nombre).replace(/'/g,"\\'")}')">+</button>
+      </div>
+    </div>`).join('') || '<div class="small-note">No hay productos disponibles</div>';
+}
+function changeQty(id, delta, maxStock, valor, nombre){
+  const current = state.cobradorCart[id]?.cantidad || 0;
+  const next = Math.max(0, current + delta);
+  if(maxStock !== undefined && next > maxStock){ toast('Stock máximo alcanzado'); return; }
+  if(next===0){ delete state.cobradorCart[id]; } else { state.cobradorCart[id] = { cantidad:next, valor, nombre, id }; }
+  document.getElementById('qty-'+id).textContent = next;
+  const total = Object.values(state.cobradorCart).reduce((a,c)=>a+c.cantidad*c.valor, 0);
+  document.getElementById('cc-total').textContent = money(total);
+}
+async function confirmarCobro(){
+  const items = Object.values(state.cobradorCart);
+  if(!items.length){ toast('Selecciona al menos un producto'); return; }
+  const total = items.reduce((a,c)=>a+c.cantidad*c.valor,0);
+  const cliente = state.cobradorCurrentCliente;
+  if(Number(cliente.saldo) < total){
+    showInsufficientDialog(total, items);
+    return;
+  }
+  await ejecutarCobro(items, total, cliente, false);
+}
+function showInsufficientDialog(total, items){
+  document.getElementById('modal-root').innerHTML = `<div class="result-flash bad">
+    <div class="result-icon bad">⚠</div>
+    <h2>Saldo insuficiente</h2>
+    <p style="color:#ffd1d6">El cliente tiene ${money(state.cobradorCurrentCliente.saldo)} y el total es ${money(total)}.</p>
+    <div style="display:flex; gap:12px; margin-top:10px;">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-root').innerHTML=''">Cancelar</button>
+      <button class="btn btn-red" onclick="ejecutarCobro(${JSON.stringify(items).replace(/"/g,'&quot;')}, ${total}, ${JSON.stringify(state.cobradorCurrentCliente).replace(/"/g,'&quot;')}, true); document.getElementById('modal-root').innerHTML=''">Continuar de todas formas</button>
+    </div>
+  </div>`;
+}
+async function ejecutarCobro(items, total, cliente, saldoInsuficiente){
+  for(const it of items){
+    await sb.from('consumos').insert({
+      usuario_id: cliente.id, pulsera_nfc: cliente.pulsera_nfc, producto_id: it.id, producto_nombre: it.nombre,
+      cantidad: it.cantidad, valor_unitario: it.valor, valor_total: it.cantidad*it.valor,
+      cobrador_id: state.cobrador?.id, cobrador_nombre: state.cobrador?.nombre, saldo_insuficiente: saldoInsuficiente
+    });
+    const { data: prod } = await sb.from('productos').select('cantidad').eq('id', it.id).single();
+    if(prod) await sb.from('productos').update({ cantidad: Math.max(0, prod.cantidad - it.cantidad) }).eq('id', it.id);
+  }
+  const nuevoSaldo = Number(cliente.saldo) - total;
+  await sb.from('usuarios').update({ saldo: nuevoSaldo }).eq('id', cliente.id);
+  await sb.from('movimientos_saldo').insert({ usuario_id: cliente.id, tipo:'consumo', monto: total, saldo_anterior: cliente.saldo, saldo_nuevo: nuevoSaldo, realizado_por: state.cobrador?.nombre||'cobrador', detalle: items.map(i=>i.nombre+' x'+i.cantidad).join(', ') });
+  showResultFlash(!saldoInsuficiente);
+  loadCobrosHoy();
+}
+function showResultFlash(ok){
+  document.getElementById('beep-ok').play().catch(()=>{});
+  document.getElementById('modal-root').innerHTML = `<div class="result-flash ${ok?'ok':'bad'}">
+    <div class="result-icon ${ok?'ok':'bad'}">${ok?'✓':'!'}</div>
+    <h2>${ok?'Cobro exitoso':'Cobro registrado sin saldo suficiente'}</h2>
+  </div>`;
+  setTimeout(()=>{ document.getElementById('modal-root').innerHTML=''; resetCobradorScan(); }, 1800);
+}
+
+/* Init */
+setRoleTab('usuario');
+</script>
+</body>
+</html>
