@@ -252,7 +252,8 @@ tr:hover td{background:rgba(255,255,255,.02);}
       <div class="flip-hint">Toca la tarjeta para ver tus consumos ↺</div>
       <div class="card" style="max-width:400px; margin:0 auto; text-align:center;">
         <div style="font-size:12.5px; color:var(--muted); font-weight:700; margin-bottom:10px;">TU CÓDIGO QR PARA COBROS</div>
-        <div class="qr-box"><canvas id="user-qr-canvas"></canvas></div>
+        <div class="qr-box" style="display:inline-block; min-width:150px; min-height:150px;"><canvas id="user-qr-canvas" width="150" height="150"></canvas></div>
+        <div class="small-note" id="user-qr-note" style="margin-top:8px;"></div>
       </div>
     </div>
 
@@ -670,6 +671,7 @@ function setUserTab(t){
   document.querySelectorAll('#user-app .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.t===t));
   document.querySelectorAll('#user-app .view-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('uv-'+t).classList.add('active');
+  if(t==='perfil') renderUserQr();
   if(t==='productos') loadProductosUsuario();
   if(t==='recargar') loadRecargasUsuario();
   if(t==='chat') loadChatUsuario();
@@ -683,8 +685,25 @@ async function renderUserProfile(){
   document.getElementById('w-pulsera').textContent = 'PULSERA · ' + (u.pulsera_nfc || 'Sin asignar');
   document.getElementById('w-saldo').textContent = money(u.saldo);
   document.getElementById('w-photo').src = u.foto_url || 'https://api.dicebear.com/7.x/initials/svg?seed=' + encodeURIComponent(u.nombre);
-  QRCode.toCanvas(document.getElementById('user-qr-canvas'), u.pulsera_nfc || u.id, { width:150, margin:1, color:{dark:'#0A0E13'} }, (err)=>{ if(err) console.error('QR error:', err); });
+  renderUserQr();
   await loadConsumosWallet();
+}
+/* El QR se genera con la CÉDULA del cliente (no con la pulsera ni con el id
+   interno): la cédula siempre existe desde que se crea la cuenta y es
+   exactamente el identificador de respaldo que usa el cobrador
+   (buscarUsuarioPorValor busca por pulsera, cédula o id) cuando no puede
+   leer el NFC de la pulsera. Así el QR funciona siempre, incluso si el
+   cliente todavía no tiene ninguna pulsera asignada. */
+function renderUserQr(){
+  const u = state.usuario;
+  const canvas = document.getElementById('user-qr-canvas');
+  const note = document.getElementById('user-qr-note');
+  if(!canvas || !u) return;
+  const valor = (u.cedula || '').trim() || u.id;
+  if(note) note.textContent = '';
+  QRCode.toCanvas(canvas, valor, { width:150, margin:1, color:{dark:'#0A0E13'} }, (err)=>{
+    if(err){ if(note) note.textContent = 'No se pudo generar el QR: '+err.message; console.error('QR error:', err); }
+  });
 }
 /* Consumos recientes que se muestran al girar la tarjeta. Se separa en su
    propia función para poder refrescarla cada vez que el usuario voltea la
@@ -1049,15 +1068,15 @@ async function saveUsuario(id){
   if(!id && savedUser && savedUser.id){ showUserQrModal(savedUser); }
 }
 function showUserQrModal(u){
-  const valorQr = u.pulsera_nfc || u.id;
+  const valorQr = (u.cedula||'').trim() || u.pulsera_nfc || u.id;
   showModal(`
     <h3>Código QR de ${esc(u.nombre)}</h3>
     <p class="small-note" style="margin-bottom:14px;">Compártelo con el cliente para que el cobrador lo escanee, o entrégale su código de acceso.</p>
     <div style="text-align:center;">
-      <div class="qr-box" style="display:inline-block;"><canvas id="new-user-qr"></canvas></div>
+      <div class="qr-box" style="display:inline-block; min-width:180px; min-height:180px;"><canvas id="new-user-qr" width="180" height="180"></canvas></div>
       <div style="margin-top:12px; font-family:var(--mono); font-size:24px; font-weight:700; letter-spacing:.12em; color:var(--green);">${esc(u.codigo_acceso||'----')}</div>
       <div class="small-note">Código de acceso</div>
-      <div class="small-note" style="margin-top:6px;">${u.pulsera_nfc ? 'QR generado con la pulsera NFC: <span class="mono">'+esc(u.pulsera_nfc)+'</span>' : 'Este cliente aún no tiene pulsera NFC asignada; el QR usa su ID interno. Asígnale una pulsera para que el QR use su serial.'}</div>
+      <div class="small-note" style="margin-top:6px;">${u.cedula ? 'QR generado con la cédula: <span class="mono">'+esc(u.cedula)+'</span> — funciona aunque no tenga pulsera NFC asignada.' : 'Este cliente no tiene cédula registrada; el QR usa un identificador interno.'}</div>
     </div>
     <button class="btn btn-primary" style="width:100%; margin-top:16px;" onclick="closeModal()">Listo</button>
   `);
