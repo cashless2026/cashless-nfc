@@ -615,7 +615,7 @@ async function renderUserProfile(){
   document.getElementById('w-pulsera').textContent = 'PULSERA · ' + (u.pulsera_nfc || 'Sin asignar');
   document.getElementById('w-saldo').textContent = money(u.saldo);
   document.getElementById('w-photo').src = u.foto_url || 'https://api.dicebear.com/7.x/initials/svg?seed=' + encodeURIComponent(u.nombre);
-  QRCode.toCanvas(document.getElementById('user-qr-canvas'), u.id, { width:150, margin:1, color:{dark:'#0A0E13'} });
+  QRCode.toCanvas(document.getElementById('user-qr-canvas'), u.id, { width:150, margin:1, color:{dark:'#0A0E13'} }, (err)=>{ if(err) console.error('QR error:', err); });
 
   const { data: consumos } = await sb.from('consumos').select('*').eq('usuario_id', u.id).order('fecha', {ascending:false}).limit(40);
   const cont = document.getElementById('w-consumos');
@@ -822,7 +822,8 @@ async function loadUsuariosAdmin(){
     <td class="mono">${esc(u.codigo_acceso)}</td><td class="mono">${esc(u.pulsera_nfc||'—')}</td>
     <td class="mono" style="color:var(--green)">${money(u.saldo)}</td>
     <td><div style="display:flex;gap:6px;"><button class="btn btn-ghost btn-sm" onclick='openUsuarioModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Editar</button>
-    <button class="btn btn-ghost btn-sm" onclick="openSaldoModal('${u.id}')">Saldo</button></div></td>
+    <button class="btn btn-ghost btn-sm" onclick="openSaldoModal('${u.id}')">Saldo</button>
+    <button class="btn btn-ghost btn-sm" onclick='showUserQrModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>QR</button></div></td>
   </tr>`).join('') || '<tr><td colspan="7" class="small-note">Sin usuarios</td></tr>';
 }
 function openUsuarioModal(u){
@@ -854,11 +855,34 @@ async function saveUsuario(id){
   if(!payload.nombre || !payload.cedula){ toast('Nombre y cédula son obligatorios'); return; }
   if(file){ fotoUrl = await uploadFile(file, `fotos/${payload.cedula}_${Date.now()}.jpg`) || fotoUrl; }
   payload.foto_url = fotoUrl || null;
-  let error;
-  if(id){ ({ error } = await sb.from('usuarios').update(payload).eq('id', id)); }
-  else { payload.saldo = 0; ({ error } = await sb.from('usuarios').insert(payload)); }
+  let error, savedUser;
+  if(id){
+    ({ error } = await sb.from('usuarios').update(payload).eq('id', id));
+    savedUser = { ...payload, id };
+  } else {
+    payload.saldo = 0;
+    const res = await sb.from('usuarios').insert(payload).select().single();
+    error = res.error; savedUser = res.data;
+  }
   if(error){ toast('Error: '+error.message); return; }
   closeModal(); toast('Usuario guardado'); loadUsuariosAdmin();
+  if(!id && savedUser && savedUser.id){ showUserQrModal(savedUser); }
+}
+function showUserQrModal(u){
+  showModal(`
+    <h3>Código QR de ${esc(u.nombre)}</h3>
+    <p class="small-note" style="margin-bottom:14px;">Compártelo con el cliente para que el cobrador lo escanee, o entrégale su código de acceso.</p>
+    <div style="text-align:center;">
+      <div class="qr-box" style="display:inline-block;"><canvas id="new-user-qr"></canvas></div>
+      <div style="margin-top:12px; font-family:var(--mono); font-size:24px; font-weight:700; letter-spacing:.12em; color:var(--green);">${esc(u.codigo_acceso||'----')}</div>
+      <div class="small-note">Código de acceso</div>
+    </div>
+    <button class="btn btn-primary" style="width:100%; margin-top:16px;" onclick="closeModal()">Listo</button>
+  `);
+  const canvas = document.getElementById('new-user-qr');
+  if(canvas && u.id){
+    QRCode.toCanvas(canvas, u.id, { width:180, margin:1, color:{dark:'#0A0E13'} }, (err)=>{ if(err) toast('No se pudo generar el QR: '+err.message); });
+  }
 }
 function openSaldoModal(userId){
   showModal(`
@@ -889,19 +913,65 @@ async function loadMovimientos(){
   </tr>`).join('') || '<tr><td colspan="7" class="small-note">Sin movimientos</td></tr>';
 }
 
-/* ---- NFC (Web NFC API — Android/Chrome) ---- */
-async function scanNfcInto(inputId){
+/* ---- NFC (Web NFC API — solo Chrome en Android, requiere HTTPS) ---- */
+let _nfcCallback = null;
+function nfcModalHTML(){
+  return `
+    <h3 id="nfc-modal-title">Acerca la pulsera NFC</h3>
+    <div style="text-align:center; margin:10px 0 16px;">
+      <div style="width:64px; height:64px; border-radius:50%; background:var(--raise); display:flex; align-items:center; justify-content:center; margin:0 auto 12px; font-size:28px;">📶</div>
+      <p class="small-note" id="nfc-modal-msg">Esperando lectura...</p>
+    </div>
+    <div class="field">
+      <label>O ingresa el ID manualmente</label>
+      <div style="display:flex; gap:8px;">
+        <input id="nfc-manual-input" placeholder="ID de la pulsera">
+        <button class="btn btn-primary btn-sm" onclick="nfcManualConfirm()">Usar</button>
+      </div>
+    </div>
+  `;
+}
+function nfcManualConfirm(){
+  const val = document.getElementById('nfc-manual-input').value.trim();
+  if(!val){ toast('Ingresa un ID'); return; }
+  finishNfcRead(val);
+}
+function finishNfcRead(value){
+  const cb = _nfcCallback; _nfcCallback = null;
+  closeModal();
+  if(cb) cb(value);
+}
+async function iniciarLecturaNFC(callback){
+  _nfcCallback = callback;
+  showModal(nfcModalHTML());
+  const msgEl = ()=>document.getElementById('nfc-modal-msg');
+  if(!window.isSecureContext){
+    if(msgEl()) msgEl().innerHTML = '⚠️ La lectura NFC solo funciona con la página abierta por <b>HTTPS</b> (o localhost). Publica la app en un hosting seguro, o ingresa el ID manualmente.';
+    return;
+  }
   if(!('NDEFReader' in window)){
-    const manual = prompt('Lectura NFC no disponible en este navegador/dispositivo. Ingresa el ID de la pulsera manualmente:');
-    if(manual) document.getElementById(inputId).value = manual.trim();
+    if(msgEl()) msgEl().innerHTML = '⚠️ Este navegador o dispositivo no soporta lectura NFC. Web NFC solo está disponible en <b>Chrome para Android</b> con el NFC del celular activado. Ingresa el ID manualmente.';
     return;
   }
   try{
     const reader = new NDEFReader();
+    reader.onreading = (event)=>{
+      const serial = event.serialNumber || ('nfc-'+Date.now());
+      finishNfcRead(serial);
+      toast('Pulsera detectada: '+serial);
+    };
+    reader.onreadingerror = ()=>{ if(msgEl()) msgEl().textContent = 'Error leyendo la pulsera, intenta de nuevo o usa el campo manual.'; };
     await reader.scan();
-    toast('Acerca la pulsera NFC...');
-    reader.onreading = (event)=>{ document.getElementById(inputId).value = event.serialNumber || 'nfc-'+Date.now(); toast('Pulsera detectada'); };
-  }catch(e){ toast('No se pudo iniciar el lector NFC: '+e.message); }
+    if(msgEl()) msgEl().textContent = 'Listo. Acerca ahora la pulsera al celular...';
+  }catch(e){
+    let msg = 'No se pudo iniciar el lector NFC.';
+    if(e.name==='NotAllowedError') msg = 'Permiso de NFC denegado. Actívalo en los ajustes del navegador o del celular e inténtalo de nuevo.';
+    else if(e.name==='NotSupportedError') msg = 'Este dispositivo no tiene NFC o está desactivado en el sistema.';
+    if(msgEl()) msgEl().innerHTML = '⚠️ ' + msg + ' Puedes ingresar el ID manualmente.';
+  }
+}
+function scanNfcInto(inputId){
+  iniciarLecturaNFC((val)=>{ document.getElementById(inputId).value = val; toast('Pulsera asignada'); });
 }
 
 /* ---- INVENTARIO (admin) ---- */
@@ -1082,14 +1152,8 @@ function startQrScan(){
     ()=>{}
   ).catch(err=> toast('No se pudo abrir la cámara: '+err));
 }
-async function startNfcScan(){
-  if(!('NDEFReader' in window)){ toast('NFC no disponible en este navegador. Usa el campo manual.'); return; }
-  try{
-    const reader = new NDEFReader();
-    await reader.scan();
-    toast('Acerca la pulsera...');
-    reader.onreading = (event)=>{ lookupCliente(event.serialNumber || ''); };
-  }catch(e){ toast('Error NFC: '+e.message); }
+function startNfcScan(){
+  iniciarLecturaNFC((val)=>{ lookupCliente(val); });
 }
 function manualScanLookup(){
   const val = document.getElementById('manual-scan-input').value.trim();
